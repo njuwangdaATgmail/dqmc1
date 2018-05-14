@@ -73,3 +73,18 @@ Then, accordingly, the effective el-el interaction is
 $$
 V_{eff}(\omega)=\frac{g^2}{2M\Omega}\frac{2\Omega}{\omega^2-\Omega^2}=\frac{g^2}{M\Omega^2}\frac{\Omega^2}{\omega^2-\Omega^2}
 $$
+
+### benchmark
+
+|                   case                   | 2-components             | 1-component                                                  | ctqmc | exact    | Johnston13' | Noack91' |      |
+| :--------------------------------------: | ------------------------ | ------------------------------------------------------------ | ----- | -------- | ----------- | -------- | ---- |
+|  $1\times4,U=4,V=0.01,\beta=4,\Omega=1$  | $P_{ph}=0.259\pm0.002$   | $0.260\pm0.001$                                              |       | $0.2593$ | $0.26$      |          |      |
+| $1\times4,U=4,V=2,\beta=4,\Omega=\infty$ | $S_{AF}=1.303\pm0.002$   |                                                              |       |          |             |          |      |
+| $1\times4,U=2,V=0,\beta=4,\Omega=\infty$ | $S_{AF}=1.303\pm0.001$   |                                                              |       |          |             |          |      |
+| $1\times2,U=4,V=2,\beta=4,\Omega=1,t=0$  | $d=0.0088\pm0.0006$      | $\langle s \rangle < 10^{-3}$                                |       | 0.0090   |             |          |      |
+|   $4\times4,U=4,V=4,\Omega=1,\beta=4$    | $S_{AF}=1.022\pm0.005$   | $\langle s \rangle < 10^{-3}$                                |       |          | $1.37$      |          |      |
+|  $4\times4,U=4,V=1.6,\Omega=1,\beta=1$   | $S_{AF}=0.9313\pm0.0002$ | $0.92\pm0.01$, $\langle s \rangle =(1.83\pm0.05)\times10^{-3}$ |       |          | 0.94        |          |      |
+|                                          |                          |                                                              |       |          |             |          |      |
+|                                          |                          |                                                              |       |          |             |          |      |
+|                                          |                          |                                                              |       |          |             |          |      |
+

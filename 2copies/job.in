@@ -1,0 +1,38 @@
+f         :restart
+f         :proj
+1         :sun
+4d0      :beta
+0.1     :dtau
+1000       :nsp
+1       :nbin
+5000     :nwarmup
+20000     :nmeasure
+1         :ninterval
+100      :ntmpout
+10       :nscratch
+20       :ngroup
+10000000 10000000 :nglobal_ising,nglobal_phi
+352501     :randomseed
+2       :norb
+
+4   4     :La, Lb
+t   t     :pbca,pbcb
+0.0d0 0.0d0   :twista,twistb
+
+1.0d0 0.0d0   :a0r
+0.0d0 1.0d0   :b0r
+
+0.0d0 0.0d0   :rorb(:,1:norb)
+0.0d0 0.0d0
+
+4d0   0.d0   0.d0      :U,V,J
+4d0   0.d0   0.d0   0.d0   :Vph_hol,brea,den_buck,hop_buck
+1d0 0.2d0 0.2d0 0.2d0   :debye_hol,brea,den_buck,hop_buck
+0.2d0 0.01d0 0.01d0 0.01d0  : dphi
+
+1   1     :cuta,cutb, hopping range
+4         :# of nonzero hopping elements
+1 0 1 1 -1d0 0d0   :hop(da,db,orb1,orb2)
+0 1 1 1 -1d0 0d0
+1 0 2 2 -1d0 0d0
+0 1 2 2 -1d0 0d0

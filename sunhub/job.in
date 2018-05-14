@@ -1,0 +1,34 @@
+f         :restart
+f         :proj
+2         :sun
+2d0      :beta
+0.1        :dtau
+100       :nsp
+1        :nbin
+5000     :nwarmup
+5000     :nmeasure
+1        :ninterval
+100      :ntmpout
+1       :nscratch
+1        :ngroup
+1 0       :nising, nphi
+10000 10000   :nglobal_ising,nglobal_phi
+532501     :randomseed
+
+1         :norb
+1   4     :La, Lb
+1         :nelec
+f   f     :pbca,pbcb
+0.0d0 0.0d0   :twista,twistb
+
+1.0d0 0.0d0   :a0r
+0.0d0 1.0d0   :b0r
+
+0.0d0 0.0d0   :rorb(:,1:norb)
+
+2.0d0       :U(1:norb)
+
+1   1     :cuta,cutb, hopping range
+2         :# of nonzero hopping elements
+1 0 1 1 -1d0 0d0   :hop(da,db,orb1,orb2)
+0 1 1 1 -1d0 0d0

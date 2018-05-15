@@ -95,3 +95,4 @@ $$
 
 + The difference between our result and HQMC may be different choice of $\Delta\tau$. 
 + It seems when $\Delta\tau$ becomes small, the results becomes unreliable... 
++ How to fix it: check histogram? global update? reduce autocorrelation by larger ninterval or smaller nsp?

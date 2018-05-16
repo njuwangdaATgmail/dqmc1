@@ -159,10 +159,11 @@ SUBROUTINE generate_newphi_global(ifield)
   INTEGER, INTENT(IN) :: ifield
   COMPLEX(8) dphi_
   INTEGER site
-  dphi_=dphi(ifield)*drand_sym()
+  !dphi_=dphi(ifield)*drand_sym()
   DO site=1,nsite; IF(.not.mask_form(site,form_phi(ifield)))CYCLE
-    !phi(site,:,ifield)=phi(site,:,ifield)+dphi_
-    phi(site,:,ifield)=-phi(site,:,ifield)
+    dphi_=dphi(ifield)*drand_sym()*0.3d0
+    phi(site,:,ifield)=phi(site,:,ifield)+dphi_
+    !phi(site,:,ifield)=-phi(site,:,ifield)
   END DO
 END SUBROUTINE
 
@@ -194,9 +195,9 @@ SUBROUTINE acceptprob_phi_global(ratio,newphi,ifield)
   ratio=ratio**sun
   DO site=1,nsite; IF(.not.mask_form(site,form_phi(ifield)))CYCLE
     DO time=1,ntime
-      !ratio=ratio*exp( -gph_x2(ifield)*(newphi(site,time)+phi(site,time,ifield))*(newphi(site,time)-phi(site,time,ifield)) ) &
-      !&          *gamma_phi(ifield)**(newphi(site,time)-phi(site,time,ifield))
-      ratio=ratio*gamma_phi(ifield)**(newphi(site,time)-phi(site,time,ifield))
+      ratio=ratio*exp( -gph_x2(ifield)*(newphi(site,time)+phi(site,time,ifield))*(newphi(site,time)-phi(site,time,ifield)) ) &
+      &          *gamma_phi(ifield)**(newphi(site,time)-phi(site,time,ifield))
+      !ratio=ratio*gamma_phi(ifield)**(newphi(site,time)-phi(site,time,ifield))
     END DO
   END DO
 !  print*,'can I be excuted?','ratio=',ratio

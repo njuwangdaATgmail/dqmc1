@@ -26,8 +26,8 @@ mod_randomlib.o: ../src/mod_randomlib.f90
 mod_measpool.o: ../src/mod_measpool.f90
 	$(F90) $(FCOPTS) -c ../src/mod_measpool.f90
 
-mod_dqmc_complex.o: ../src/mod_dqmc_complex.f90 mod_matrixlib.o mod_randomlib.o mod_measpool.o
-	$(F90) $(FCOPTS) -c ../src/mod_dqmc_complex.f90
+mod_dqmc_complex.o: mod_dqmc_complex.f90 mod_matrixlib.o mod_randomlib.o mod_measpool.o
+	$(F90) $(FCOPTS) -c mod_dqmc_complex.f90
 
 mod_model.o: mod_model.f90
 	$(F90) $(FCOPTS) -c mod_model.f90

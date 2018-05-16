@@ -14,3 +14,6 @@ How to check the code?
   + 1-site model (or t=0 in 2-site model), by Lang-Firsov transformation
   + 2-site model, see Alexandrov, 1994'? (only T=0)
   + Johnston, 2013'.
+
+Todo:
+  + remove unnecessary parts outside of the core. For example: init_phi, init_ising, generate_new_ising, generate_new_phi.

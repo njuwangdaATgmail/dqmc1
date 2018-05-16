@@ -76,23 +76,25 @@ $$
 
 ### benchmark
 
-|                   case                   | 2-components             |                         1-component                          | ctqmc                                  | exact    | Johnston13' | Noack91'    | Vekic92' |
-| :--------------------------------------: | ------------------------ | :----------------------------------------------------------: | -------------------------------------- | -------- | ----------- | ----------- | -------- |
-|  $1\times4,U=4,V=0.01,\beta=4,\Omega=1$  | $P_{ph}=0.259\pm0.002$   |                       $0.260\pm0.001$                        |                                        | $0.2593$ | $0.26$      |             |          |
-| $1\times4,U=4,V=2,\beta=4,\Omega=\infty$ | $S_{AF}=1.303\pm0.002$   |                                                              |                                        |          |             |             |          |
-|        $1\times4,U=2,V=0,\beta=4$        | $S_{AF}=1.303\pm0.001$   |                       $1.303\pm0.001$                        |                                        |          |             |             |          |
-| $1\times2,U=4,V=2,\beta=4,\Omega=1,t=0$  | $d=0.0088\pm0.0006$      |                $\langle s \rangle < 10^{-3}$                 |                                        | 0.0090   |             |             |          |
-|   $4\times4,U=4,V=4,\Omega=1,\beta=4$    | $S_{AF}=1.022\pm0.005$   |                $\langle s \rangle < 10^{-3}$                 |                                        |          | $1.37$      |             |          |
-|  $4\times4,U=4,V=1.6,\Omega=1,\beta=1$   | $S_{AF}=0.9313\pm0.0002$ | $0.92\pm0.01$, $\langle s \rangle =(1.83\pm0.05)\times10^{-3}$ |                                        |          | 0.94        |             |          |
-|   $1\times2,U=4,V=2,\Omega=1,\beta=1$    | $G_{12}=0.163\pm0.001$   |                                                              | $0.162\pm0.001,\langle s\rangle=0.27$  |          |             |             |          |
-|   $1\times2,U=4,V=4,\Omega=1,\beta=1$    | $G_{12}=0.141\pm0.003$   |                                                              | $0.138\pm0.001,\langle s \rangle=0.09$ |          |             |             |          |
-|   $8\times8,U=0,V=2,\Omega=1,\beta=12$   | $S_{CDW}=18.2\pm0.8$     |                                                              |                                        |          |             | $23\pm1$    |          |
-|   $4\times4,U=0,V=2,\Omega=1,\beta=12$   | $S_{CDW}=6.90\pm0.02$    |                        $6.92\pm0.01$                         |                                        |          |             | $7.6\pm0.3$ |          |
-|   $4\times4,U=0,V=2,\Omega=1,\beta=8$    |                          |                                                              |                                        |          |             |             |          |
-|                                          |                          |                                                              |                                        |          |             |             |          |
-|                                          |                          |                                                              |                                        |          |             |             |          |
-|  SSH $4\times4,V=0.5,\Omega=1,\beta=4$   |                          |                    $S_{AF}=0.792\pm0.003$                    | $0.789$ Beyl(2018) (also HQMC)         |          |             |             |          |
+|                   case                   | 2-components             |                         1-component                          |                 ctqmc                  |  exact   | Johnston13' | Noack91' |   Vekic92'   |
+| :--------------------------------------: | ------------------------ | :----------------------------------------------------------: | :------------------------------------: | :------: | :---------: | :------: | :----------: |
+|  $1\times4,U=4,V=0.01,\beta=4,\Omega=1$  | $P_{ph}=0.259\pm0.002$   |                       $0.260\pm0.001$                        |                                        | $0.2593$ |   $0.26$    |          |              |
+| $1\times4,U=4,V=2,\beta=4,\Omega=\infty$ | $S_{AF}=1.303\pm0.002$   |                                                              |                                        |          |             |          |              |
+|        $1\times4,U=2,V=0,\beta=4$        | $S_{AF}=1.303\pm0.001$   |                       $1.303\pm0.001$                        |                                        |          |             |          |              |
+| $1\times2,U=4,V=2,\beta=4,\Omega=1,t=0$  | $d=0.0088\pm0.0006$      |                $\langle s \rangle < 10^{-3}$                 |                                        |  0.0090  |             |          |              |
+|   $4\times4,U=4,V=4,\Omega=1,\beta=4$    | $S_{AF}=1.022\pm0.005$   |                $\langle s \rangle < 10^{-3}$                 |                                        |          |   $1.37$    |          |              |
+|  $4\times4,U=4,V=1.6,\Omega=1,\beta=1$   | $S_{AF}=0.9313\pm0.0002$ | $0.92\pm0.01$, $\langle s \rangle =(1.83\pm0.05)\times10^{-3}$ |                                        |          |    0.94     |          |              |
+|   $1\times2,U=4,V=2,\Omega=1,\beta=1$    | $G_{12}=0.163\pm0.001$   |                                                              | $0.162\pm0.001,\langle s\rangle=0.27$  |          |             |          |              |
+|   $1\times2,U=4,V=4,\Omega=1,\beta=1$    | $G_{12}=0.141\pm0.003$   |                                                              | $0.138\pm0.001,\langle s \rangle=0.09$ |          |             |          |              |
+|   $8\times8,U=0,V=2,\Omega=1,\beta=12$   | $S_{CDW}=18.2\pm0.8$     |                                                              |                                        |          |             | $23\pm1$ | $25.3\pm0.3$ |
+|   $4\times4,U=0,V=2,\Omega=1,\beta=12$   | $S_{CDW}=6.90\pm0.02$    |                        $6.92\pm0.01$                         |                                        |          |             |          | $7.6\pm0.3$  |
+|   $4\times4,U=0,V=2,\Omega=1,\beta=8$    |                          |                                                              |                                        |          |             |          |              |
+|   $4\times4,U=0,V=2,\Omega=1,\beta=6$    |                          |                    $S_{CDW}=5.06\pm0.05$                     |                                        |          |             |          | $6.5\pm0.5$  |
+|   $4\times4,U=0,V=2,\Omega=1,\beta=4$    |                          |                    $S_{CDW}=2.47\pm0.02$                     |                                        |          |             |          | $2.67\pm0.2$ |
+|  SSH $4\times4,V=0.5,\Omega=1,\beta=4$   |                          |                    $S_{AF}=0.792\pm0.003$                    | $0.789$ by Beyl(2018) (also with HQMC) |          |             |          |              |
 
 + The difference between our result and HQMC may be different choice of $\Delta\tau$. 
 + It seems when $\Delta\tau$ becomes small, the results becomes unreliable... 
 + How to fix it: check histogram? global update? reduce autocorrelation by larger ninterval or smaller nsp?
++ By setting nsp=1, nglobal=1, our result is still in disagreement with HQMC. 
++ Is HQMC exact? The authors didn't give any QMC parameters... 

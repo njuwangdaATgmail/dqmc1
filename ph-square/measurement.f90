@@ -41,4 +41,10 @@ SUBROUTINE measurement(time)
 
   g3=g3*currentphase
   CALL put_pool(2,g3(1:2,1))
+
+  !if(id==0)THEN
+  !OPEN(16,FILE='phihist.dat',ACCESS='APPEND')
+  !WRITE(16,'(100000f8.3)') real(phi(:,:,1))  ! to save space, we can also output one site/one time 
+  !CLOSE(16)
+  !ENDIF
 END SUBROUTINE

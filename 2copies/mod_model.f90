@@ -40,6 +40,8 @@ MODULE model
 
   COMPLEX(8), ALLOCATABLE :: kmat(:,:)
 
+  REAL(8) :: global_scale = 1d0
+
 CONTAINS
 
   INTEGER FUNCTION label(a,b,orb)
@@ -161,7 +163,7 @@ SUBROUTINE generate_newphi_global(ifield)
   INTEGER site
   !dphi_=dphi(ifield)*drand_sym()
   DO site=1,nsite; IF(.not.mask_form(site,form_phi(ifield)))CYCLE
-    dphi_=dphi(ifield)*drand_sym()*0.3d0
+    dphi_=dphi(ifield)*drand_sym()*global_scale
     phi(site,:,ifield)=phi(site,:,ifield)+dphi_
     !phi(site,:,ifield)=-phi(site,:,ifield)
   END DO

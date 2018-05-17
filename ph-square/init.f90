@@ -106,6 +106,7 @@ SUBROUTINE init()
   dphi(2:3)=re2
   dphi(4:5)=re3
   dphi(6:9)=re4
+  READ(10,*) global_scale
   
   READ(10,*) cuta,cutb
   ALLOCATE(hop(-cuta:cuta,-cutb:cutb,norb,norb))

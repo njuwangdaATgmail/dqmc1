@@ -10,9 +10,9 @@ f         :proj
 1         :ninterval
 100      :ntmpout
 10       :nscratch
-20       :ngroup
-10000000 10000000 :nglobal_ising,nglobal_phi
-352501     :randomseed
+10       :ngroup
+10000000 1 :nglobal_ising,nglobal_phi
+752501     :randomseed
 2       :norb
 
 4   4     :La, Lb
@@ -29,6 +29,7 @@ t   t     :pbca,pbcb
 4d0   0.d0   0.d0   0.d0   :Vph_hol,brea,den_buck,hop_buck
 1d0 0.2d0 0.2d0 0.2d0   :debye_hol,brea,den_buck,hop_buck
 0.2d0 0.01d0 0.01d0 0.01d0  : dphi
+0.5d0     :global_scale
 
 1   1     :cuta,cutb, hopping range
 4         :# of nonzero hopping elements

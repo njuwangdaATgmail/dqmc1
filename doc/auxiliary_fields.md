@@ -99,3 +99,10 @@ $$
 + How to fix it: check histogram? global update? reduce autocorrelation by larger ninterval or smaller nsp?
 + By setting nsp=1, nglobal=1, our result is still in disagreement with HQMC. 
 + Is HQMC exact? The authors didn't give any QMC parameters... 
+
+####  More examples to test:
++ 1D Hubbard-Holstein model. In special, $1\times4$ with periodic boundary condition can be viewed as $2\times2$
++ 2-site Hubbard-Holstein model.
++ phonon only couple to 1-site?
++ choose different form?
+

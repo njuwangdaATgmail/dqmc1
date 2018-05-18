@@ -105,4 +105,18 @@ $$
 + 2-site Hubbard-Holstein model.
 + phonon only couple to 1-site?
 + choose different form?
++ auxiliary imaginary phonon field coupling to fermion spin? overcome the ergodicity problem?
 
+#### Passed tests (parameter space $U,t,V,\Omega$):
++ $U=0$: HQMC(?),CTQMC
++ $t=0$: Lang-Firsov
++ $V=0$: free boson gas
++ $\Omega=\infty$: $U-V$-DQMC
++ $1\times2$ ($1\times4$ or $2\times2$?) in general: CTQMC
++ equivalence between real (spin channel) and imaginary (charge channel) HS decouplings of $U$
+
+` So let's focus on pure Holstein model. Can global update help?
+
+### questions:
++ How $U$ affects $T_c$? 
++ Even for pure Holstein model, in fact, the $T_c$ value is still different in different papers, *e.g.* Costa(2017) and Weber(2017).

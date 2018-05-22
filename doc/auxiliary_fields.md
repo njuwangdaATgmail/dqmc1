@@ -115,7 +115,17 @@ $$
 + $1\times2$ ($1\times4$ or $2\times2$?) in general: CTQMC
 + equivalence between real (spin channel) and imaginary (charge channel) HS decouplings of $U$
 
-` So let's focus on pure Holstein model. Can global update help?
+` So let's focus on pure Holstein model. Can global update help? Surely, it helps.
+
++ We can use higher-T auxiliary field as the low-T input, which may strongly reduce the warmup time.
++ The result shows: heat-bath ratio goes to equilibrium more slowly than Metropolis, while the latter may falss to local minima quickly. As a result, people may use corrected Metropolis algorithm instead:
+$$
+p=\frac{r}{1+\alpha r}, \quad\text{if}\,\, r<1
+$$
+while
+$$
+p=\frac{r}{\alpha+r},\quad\text{if}\,\, r>1
+$$
 
 ### questions:
 + How $U$ affects $T_c$? 

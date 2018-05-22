@@ -1,4 +1,12 @@
-! still in process
+! I am designing a new and simpler version:
+! + multi-flavor fermions are able to be simulated
+! + both discrete and continuous fields are treated in the same way
+! + each field has a unique form
+! + BB...B are stored to accelerate:
+!     in update_scratch(time), use BBB(time->time-nscratch) directly, 
+!     and then update BBB(time+nscratch->time) preparing for the next time of update_scratch
+! + For T=0 case, we need store BBB(1->time) and BBB(time+nscratch->ntime)
+! + checkerboard algorithm for expk?
 MODULE dqmc_complex
 
 #ifdef MPI
@@ -98,135 +106,69 @@ CONTAINS
     INTEGER ith,mcs,ierr,ifield
 
 #ifdef MPI
+    ! set MPI mode
     CALL mpi_init(ierr)
     CALL mpi_comm_size(mpi_comm_world,nd,ierr)
     CALL mpi_comm_rank(mpi_comm_world,id,ierr)
-    IF(id==0)t0=mpi_wtime()
+    IF(id==0)t0=mpi_wtime()  ! It seems mpi_wtime() may fail on very few machines.
 #else
+    ! set sequential mode
     nd=1
     id=0
     CALL cpu_time(t0)
 #endif
-    
-    CALL init()  ! external initialization subroutine, set required parameters listed above
-    CALL init_internal()  ! internal initialization, set remaining parameters
 
-#ifdef MPI
-    CALL mpi_barrier(mpi_comm_world,ierr)
-#endif
-    IF(id==0)PRINT*,'initialization finished, taking',runtime(),'s'
+    ! external initialization subroutine, set required parameters listed above
+    CALL init()
     
+    ! internal initialization, set remaining parameters
+    CALL init_internal()  
+
     DO ith=ith_start,nbin
 
-      ! warm up
       IF(ith==0)THEN
 
+        ! do warmup
         DO mcs=mcs_start,nwarmup
           
           ! do global update
-          DO ifield=1,nising; IF(.not.mask_ising(ifield))CYCLE
-            IF(mod(mcs,nglobal_ising(ifield))==0) CALL dqmc_update_global(ifield,'ising')
-          END DO
-          DO ifield=1,nphi; IF(.not.mask_phi(ifield))CYCLE
-            IF(mod(mcs,nglobal_phi(ifield))==0) CALL dqmc_update_global(ifield,'phi  ')
+          DO ifield=1,nfield; IF(.not.mask_field(ifield))CYCLE
+            IF(mod(mcs,ninterval_global(ifield))==0) CALL dqmc_update_global(ifield)
           END DO
           
-          CALL dqmc_update(.false.)  !update Ising configuration without doing measurement
+          ! do local update without doing measurement
+          CALL dqmc_update_local(.false.)  
           
-          IF(mod(mcs,ntmpout)==0)THEN
-            
-            !----------------------------------------------------------------------------------
-            IF(id==0)THEN
-              ! temporirally output the running status
-              PRINT'(2i8,1a,1e13.6,1a,1e13.6,1a,1f15.2,1A,1e13.6)',ith,mcs,'     (', &
-              &  real(currentphase),',',aimag(currentphase),')',runtime(),'s     ',err_fast
-              err_fast=0d0
-              IF(nising>0)THEN
-                PRINT'(1a50,12f7.4)','ising acceptance rate of local update:', &
-                        & Naccept_ising(:)*1d0/(Ntotal_ising(:)+1d-30)
-                PRINT'(1a50,12f7.4)','ising acceptance rate of global update:', &
-                        & Naccept_ising_global(:)*1d0/(Ntotal_ising_global(:)+1d-30)
-              END IF
-              IF(nphi>0)THEN
-                PRINT'(1a50,12f7.4)','phi acceptance rate of local update:', &
-                        & Naccept_phi(:)*1d0/(Ntotal_phi(:)+1d-30)
-                PRINT'(1a50,12f7.4)','phi acceptance rate of global update:', &
-                        & Naccept_phi_global(:)*1d0/(Ntotal_phi_global(:)+1d-30)
-                PRINT*,'phi range:'
-                DO ifield=1,nphi
-                  IF(mask_phi(ifield)) PRINT'(1i4,1a46,4e15.4)',ifield,'  max(Re), min(Re), max(Im), min(Im):', &
-                  & maxval(real(phi(:,:,ifield))),minval(real(phi(:,:,ifield))), &
-                  & maxval(aimag(phi(:,:,ifield))),minval(aimag(phi(:,:,ifield)))
-                END DO
-              END IF
-              PRINT*,'-----------------------------------'
-            END IF
-            !--------------------------------------------------------------------------------
-            ! The above block can be but into tmpout()
-            CALL tmpout(ith,mcs)
-          END IF
+          ! output information to screen and save work sapce into hardware
+          IF(mod(mcs,ntmpout)==0) CALL tmpout(ith,mcs)
 
-        END DO  ! DO mcs=mcs_start,nwarmup
-        
-        mcs_start=1   ! in case the program starts from a break point with mcs_start>1
+        END DO ! DO mcs=mcs_start,nwarmup
+
+        ! reset mcs_start=1 in case the program starts from a break point with mcs_start>1
+        mcs_start=1
     
-      ! measurement
       ELSE  ! IF(ith==0)
       
+        ! do measurement
         DO mcs=mcs_start,nmeasure*ninterval
 
           ! do global update
-          ! Do we need perform global update within each space-time sweep of local update?
-          ! Maybe we can put the following global and local upate into a unique subroutine
-          DO ifield=1,nising; IF(.not.mask_ising(ifield))CYCLE
-            IF(mod(mcs,nglobal_ising(ifield))==0) CALL dqmc_update_global(ifield,'ising')
-          END DO
-          DO ifield=1,nphi; IF(.not.mask_phi(ifield))CYCLE
-            IF(mod(mcs,nglobal_phi(ifield))==0) CALL dqmc_update_global(ifield,'phi  ')
+          DO ifield=1,nfield; IF(.not.mask_field(ifield))CYCLE
+            IF(mod(mcs,ninterval_global(ifield))==0) CALL dqmc_update_global(ifield)
           END DO
           
-          ! only do measurement every ninterval MCSs
+          ! only do measurement every ninterval space-time sweeps
           IF(mod(mcs,ninterval)==0)THEN
-            CALL dqmc_update(.true.)
+            CALL dqmc_update_local(.true.)
           ELSE
-            CALL dqmc_update(.false.)
+            CALL dqmc_update_local(.false.)
           END IF
           
-          IF(mod(mcs,ntmpout)==0)THEN
-            !------------------------------------------------------------------------------
-            IF(id==0)THEN
-              ! temporarily output the running status
-              PRINT'(2i8,1a,1e13.6,1a,1e13.6,1a,1f15.2,1A,1e13.6)',ith,mcs,'     (', &
-              &  real(currentphase),',',aimag(currentphase),')',runtime(),'s    ',err_fast
-              err_fast=0d0
-              IF(nising>0)THEN
-                PRINT'(1a50,12f7.4)','ising acceptance rate of local update:', &
-                        & Naccept_ising(:)*1d0/(Ntotal_ising(:)+1d-30)
-                PRINT'(1a50,12f7.4)','ising acceptance rate of global update:', &
-                        & Naccept_ising_global(:)*1d0/(Ntotal_ising_global(:)+1d-30)
-              END IF
-              IF(nphi>0)THEN
-                PRINT'(1a50,12f7.4)','phi acceptance rate of local update:', &
-                        & Naccept_phi(:)*1d0/(Ntotal_phi(:)+1d-30)
-                PRINT'(1a50,12f7.4)','phi acceptance rate of global update:', &
-                        & Naccept_phi_global(:)*1d0/(Ntotal_phi_global(:)+1d-30)
-                PRINT*,'phi range:'
-                DO ifield=1,nphi
-                  IF(mask_phi(ifield)) PRINT'(1i4,1a46,4e15.4)',ifield,'  max(Re), min(Re), max(Im), min(Im):', &
-                  & maxval(real(phi(:,:,ifield))),minval(real(phi(:,:,ifield))), &
-                  & maxval(aimag(phi(:,:,ifield))),minval(aimag(phi(:,:,ifield)))
-                END DO
-              END IF
-              PRINT*,'-----------------------------------'
-            END IF
-            !----------------------------------------------------------------------------
-            ! The above block can be put into tmpout()
-            CALL tmpout(ith,mcs)
-          END IF
+          IF(mod(mcs,ntmpout)==0) CALL tmpout(ith,mcs)
         
-        END DO  ! DO mcs=1,nmeasure*ninterval
+        END DO  ! DO mcs=mcs_start,nmeasure*ninterval
         
-        ! reset mcs_start=1 in case that the program starts from a break point with mcs_start>1
+        ! reset mcs_start=1 in case the program starts from a break point with mcs_start>1
         mcs_start=1
 
         ! prepare the pool for the next data bin: move bin to bin+1 and reset head
@@ -235,10 +177,6 @@ CONTAINS
       END IF  ! IF(ith==0)
 
     END DO  ! DO ith=ith_start,nbin
-
-#ifdef MPI    
-    CALL mpi_barrier(mpi_comm_world,ierr)
-#endif
 
     ! do average of the measured observables in the pool
     CALL average_pool()
@@ -462,537 +400,38 @@ CONTAINS
 
   END SUBROUTINE
 
-  !> do global update, which strongly depends on how the new boson fields
-  !! are generated as specified in external subroutines.
-  !! maybe still need further check
-  SUBROUTINE dqmc_update_global(ifield,job)
-    IMPLICIT NONE
-    INTEGER, INTENT(IN) :: ifield
-    CHARACTER*5, INTENT(IN) :: job
-    INTEGER i,p,flag,j
-    INTEGER, ALLOCATABLE :: ising_old(:,:),ising_new(:,:)
-    COMPLEX(8), ALLOCATABLE :: phi_old(:,:),phi_new(:,:)
-    COMPLEX(8) ratio,dvec(nsite),dvec_old(nsite)
-    COMPLEX(8) qmat(nsite,nsite),rmat(nsite,nsite),Bmat(nsite,nsite)
-    
-    ratio=1d0
-
-    ! get det(P'BP) or det(1+B). In practice, we save their eigenvalues
-      dvec=1d0
-      qmat=0d0
-      Bmat=0d0
-      DO i=1,nsite
-        qmat(i,i)=1d0
-        Bmat(i,i)=1d0
-      END DO
-      
-      flag=0
-      DO p=1,ntime
-        CALL evolve_left(p,qmat,nsite)
-        flag=flag+1
-        IF(flag/=ngroup)CYCLE
-        flag=0
-        DO i=1,nsite
-          qmat(:,i)=qmat(:,i)*dvec(i)
-        END DO
-        CALL zqdr(nsite,nsite,qmat,rmat,dvec)
-        Bmat=matmul(rmat,Bmat)
-      END DO
-      ! B*...*B=qmat*dvec*Bmat
-
-    IF(proj)THEN  !det(P'*B*P)
-      
-      qmat(1:nelec,1:nsite)=matmul(conjg(transpose(slater)),qmat)
-      rmat(1:nsite,1:nelec)=matmul(Bmat,slater)
-      DO i=1,nelec
-        DO j=1,nelec
-          Bmat(i,j)=sum(qmat(i,:)*dvec(:)*rmat(:,j))
-        END DO
-      END DO
-      CALL qdr(nelec,nelec,Bmat(1:nelec,1:nelec),rmat(1:nelec,1:nelec),dvec_old)
-      ratio=ratio/det(nelec,Bmat(1:nelec,1:nelec))
-      CALL ordering(nelec,dvec_old(1:nelec))
-    
-    ELSE   !det(1+B)
-      
-      ratio=ratio/det(nsite,qmat)
-      CALL inverse(nsite,qmat)
-      DO i=1,nsite
-        qmat(i,:)=qmat(i,:)+dvec(i)*Bmat(i,:)
-      END DO
-      CALL qdr(nsite,nsite,qmat,rmat,dvec_old)
-      ratio=ratio/det(nsite,qmat)
-      CALL ordering(nsite,dvec_old)
-
-    END IF
-    
-    ! generate newising or newphi externally
-    IF(job=='ising')THEN
-      ALLOCATE(ising_old(nsite,ntime),ising_new(nsite,ntime))
-      ising_old=ising(:,:,ifield)
-      CALL generate_newising_global(ifield)
-    ELSE
-      ALLOCATE(phi_old(nsite,ntime),phi_new(nsite,ntime))
-      phi_old=phi(:,:,ifield)
-      CALL generate_newphi_global(ifield)
-    END IF
-
-    ! get new det(P'BP) or det(1+B)
-      dvec=1d0
-      qmat=0d0
-      Bmat=0d0
-      DO i=1,nsite
-        qmat(i,i)=1d0
-        Bmat(i,i)=1d0
-      END DO
-      
-      flag=0
-      DO p=1,ntime
-        CALL evolve_left(p,qmat,nsite)
-        flag=flag+1
-        IF(flag/=ngroup)CYCLE
-        flag=0
-        DO i=1,nsite
-          qmat(:,i)=qmat(:,i)*dvec(i)
-        END DO
-        CALL zqdr(nsite,nsite,qmat,rmat,dvec)
-        Bmat=matmul(rmat,Bmat)
-      END DO
-      ! B*...*B=qmat*dvec*Bmat
-
-    IF(proj)THEN  !det(P'*B*P)
-      
-      qmat(1:nelec,1:nsite)=matmul(conjg(transpose(slater)),qmat)
-      rmat(1:nsite,1:nelec)=matmul(Bmat,slater)
-      DO i=1,nelec
-        DO j=1,nelec
-          Bmat(i,j)=sum(qmat(i,:)*dvec(:)*rmat(:,j))
-        END DO
-      END DO
-      CALL qdr(nelec,nelec,Bmat(1:nelec,1:nelec),rmat(1:nelec,1:nelec),dvec)
-      ratio=ratio*det(nelec,Bmat(1:nelec,1:nelec))
-      CALL ordering(nelec,dvec(1:nelec))
-    
-    ELSE   !det(1+B)
-      
-      ratio=ratio*det(nsite,qmat)
-      CALL inverse(nsite,qmat)
-      DO i=1,nsite
-        qmat(i,:)=qmat(i,:)+dvec(i)*Bmat(i,:)
-      END DO
-      CALL qdr(nsite,nsite,qmat,rmat,dvec)
-      ratio=ratio*det(nsite,qmat)
-      CALL ordering(nsite,dvec)
-
-    END IF
-
-    ! get accept ratio from the determinant ratio externally
-    IF(proj)THEN
-      DO i=1,nelec
-        ratio=ratio*dvec(i)/dvec_old(i)
-      END DO
-    ELSE
-      DO i=1,nsite
-        ratio=ratio*dvec(i)/dvec_old(i)
-      END DO
-    END IF
-    IF(job=='ising')THEN
-      ising_new(:,:)=ising(:,:,ifield)
-      ising(:,:,ifield)=ising_old(:,:)
-      CALL acceptprob_ising_global(ratio,ising_new,ifield)
-    ELSE  ! job='phi'
-      phi_new(:,:)=phi(:,:,ifield)
-      phi(:,:,ifield)=phi_old(:,:)
-      CALL acceptprob_phi_global(ratio,phi_new,ifield)
-    END IF
-    
-    ! if accepted, update ising or phi
-    ! Here, we don't need to update Green's function since we will 
-    ! always do that in the following step of local update
-    IF(job=='ising')THEN
-      Ntotal_ising_global(ifield)=Ntotal_ising_global(ifield)+1
-    ELSE
-      Ntotal_phi_global(ifield)=Ntotal_phi_global(ifield)+1
-    END IF
-
-    IF(drand()>abs(ratio))RETURN
-    
-    IF(job=='ising')THEN
-      Naccept_ising_global(ifield)=Naccept_ising_global(ifield)+1
-    ELSE
-      Naccept_phi_global(ifield)=Naccept_phi_global(ifield)+1
-    END IF
-
-    currentphase=currentphase*ratio/abs(ratio)
-
-    IF(job=='ising')THEN
-      ising(:,:,ifield)=ising_new
-    ELSE
-      phi(:,:,ifield)=phi_new
-    END IF
-
-  END SUBROUTINE
   
-  !> do local update, try to update all ising and phi once locally
-  !> one Monte Carlo step.
-  SUBROUTINE dqmc_sweep(mcs,do_meas)
-    IMPLICIT NONE
-    LOGICAL, INTENT(IN) :: do_meas
-    INTEGER time,site,newising,oldising,i,iform,ndim,a,b,j,sitea,siteb
-    COMPLEX(8) ratio,newphi,oldphi,delta_ja,gtmp(nsite,nsite)
-    COMPLEX(8) delta(maxval(ndim_form),maxval(ndim_form)),ratiomat(maxval(ndim_form),maxval(ndim_form))
-    
-    ! When to do global update?
-    ! IF( mod(mcs,dis_mcs_global_ising(ifield))==0 ) CALL update_global(...)
-    ! IF( mod(time,dis_time_global_ising(ifield))==0 ) ...
-    ! IF( mod(site,dis_site_global_ising(ifield))==0 ) ...
-    ! ising-->phi
-
-    DO time=1,ntime
-       
-      IF(mod(time-1,nscratch)==0)THEN
-        IF(proj)THEN
-          CALL update_scratch_T0(time)  ! update Green's function using definition every nscratch steps
-                                        ! and calculate the error from fast update
-        ELSE
-          CALL update_scratch(time)
-        END IF
-      ELSE
-        g=matmul(matmul(expk,g),inv_expk)
-      END IF
-      
-      IF(proj)THEN
-        IF(do_meas.and.abs(time-ntime/2-1)<=nsp)THEN
-          CALL add_pool()         ! before measurement(), always perform this 
-                                  ! which will prepare the pool for the measurement.
-          CALL measurement(time)  ! external subroutine, do measurement
-        END IF
-      ELSE
-        IF(do_meas.and.time<=nsp)THEN ! do measurement for time<=nsp
-          CALL add_pool()         ! before measurement(), always perform this 
-                                  ! which will prepare the pool for the measurement.
-          CALL measurement(time)  ! external subroutine, do measurement
-        END IF
-      ENDIF
-
-      DO site=1,nsite
-
-        DO ifield=1,nising
-        
-          CALL dqmc_update_local(site,time,'ising',...)
-
-          IF(mod(time,ninterval_time_ising(ifield))==0.and.mod(site,ninterval_site_ising(ifield)==0))THEN
-            CALL dqmc_update_global(...)
-          END IF
-
-        END DO
-
-        DO ifield=1,nphi
-          
-          CALL dqmc_update_local(site,time,'phi',...)
-
-          IF(mod(time,ninterval_time_phi(ifield))==0.and.mod(site,ninterval_site_phi(ifield)==0))THEN
-            CALL dqmc_update_global(...)
-          END IF
-
-        END DO
-
-      END DO
-
-    END DO
-
-  END SUBROUTINE dqmc_sweep
-
-    
-    DO time=1,ntime
-
-      
-      IF(mod(time-1,nscratch)==0)THEN
-        IF(proj)THEN
-          CALL update_scratch_T0(time)  ! update Green's function using definition every nscratch steps
-                                        ! and calculate the error from fast update
-        ELSE
-          CALL update_scratch(time)
-        END IF
-      ELSE
-        g=matmul(matmul(expk,g),inv_expk)
-        !CALL zgemm('n','n',nsite,nsite,nsite,zone,expk,nsite,g,nsite,zzero,gtmp,nsite)
-        !CALL zgemm('n','n',nsite,nsite,nsite,zone,gtmp,nsite,inv_expk,nsite,zzero,g,nsite)
-      END IF
-      
-      IF(proj)THEN
-        IF(do_meas.and.abs(time-ntime/2-1)<=nsp)THEN
-          CALL add_pool()         ! before measurement(), always perform this 
-                                  ! which will prepare the pool for the measurement.
-          CALL measurement(time)  ! external subroutine, do measurement
-        END IF
-      ELSE
-        IF(do_meas.and.time<=nsp)THEN ! do measurement for time<=nsp
-          CALL add_pool()         ! before measurement(), always perform this 
-                                  ! which will prepare the pool for the measurement.
-          CALL measurement(time)  ! external subroutine, do measurement
-        END IF
-      ENDIF
-      
-      DO i=1,nising; IF(.not.mask_ising(i))CYCLE  ! update the i-th ising field locally
-        
-        iform=form_ising(i)
-        ndim=ndim_form(iform)
-
-        DO site=1,nsite; IF(.not.mask_form(site,iform))CYCLE  ! try to update ising on each site-block
-          
-          oldising=ising(site,time,i)
-          newising=isingflip(irand(isingmax(i)-1)+1,oldising)  ! choose a new ising randomly
-
-          delta(1:ndim,1:ndim)=diff_ef(1:ndim,1:ndim,newising,oldising,site,i)
-
-          IF(ndim==1)THEN
-            ratio=1d0+(1d0-g(site,site))*delta(1,1)
-            ratiomat(1,1)=ratio
-          ELSE
-            DO a=1,ndim
-              DO b=1,ndim
-                gtmp(a,b)=g(nb_form(site,a,iform),nb_form(site,b,iform))
-              END DO
-            END DO
-            ratiomat(1:ndim,1:ndim)=delta(1:ndim,1:ndim)-matmul(gtmp(1:ndim,1:ndim),delta(1:ndim,1:ndim))
-            DO a=1,ndim
-              ratiomat(a,a)=ratiomat(a,a)+1d0
-            END DO
-            ratio=det(ndim,ratiomat(1:ndim,1:ndim))    ! acceptance ratio of the working fermion component.
-          END IF
-          CALL acceptprob_ising(ratio,newising,site,time,i)  
-          ! call external subroutine to get the total acceptance ratio including
-          ! gamma, other components, weight of phonon or gauge fields, etc. 
-          ! This part is highly model dependent.
-
-          Ntotal_ising(i)=Ntotal_ising(i)+1
-          IF(drand()>abs(ratio))CYCLE
-          Naccept_ising(i)=Naccept_ising(i)+1
-
-          currentphase=currentphase*ratio/abs(ratio)     ! obtain the phase of the current 'weight'
-          ! update Green's function based on Dyson equation
-          IF(ndim==1)THEN
-            gtmp=g
-            DO j=1,nsite
-              delta_ja=0d0
-              IF(j==site)delta_ja=1d0
-              gtmp(j,:)=gtmp(j,:)+(g(j,site)-delta_ja)*delta(1,1)/ratiomat(1,1)*g(site,:)
-            END DO
-            g=gtmp
-          ELSE
-            CALL inverse(ndim,ratiomat(1:ndim,1:ndim))
-            delta(1:ndim,1:ndim)=matmul(delta(1:ndim,1:ndim),ratiomat(1:ndim,1:ndim))
-            gtmp=g
-            DO j=1,nsite
-              DO a=1,ndim; sitea=nb_form(site,a,iform)
-                delta_ja=0d0
-                IF(j==sitea) delta_ja=1d0
-                DO b=1,ndim; siteb=nb_form(site,b,iform)
-                  gtmp(j,:)=gtmp(j,:)+(g(j,sitea)-delta_ja)*delta(a,b)*g(siteb,:)
-                END DO
-              END DO
-            END DO
-            g=gtmp
-          END IF
-          ising(site,time,i)=newising
-
-        END DO
-
-        ! update Green's function by exp(lam*F)*G*exp(-lam*F)
-        CALL evolve_left_ising(time,i,g,nsite)
-        CALL inv_evolve_right_ising(time,i,g,nsite)
-      END DO
-
-      DO i=1,nphi; IF(.not.mask_phi(i))CYCLE  ! update the i-th phi field locally
-        
-        iform=form_phi(i)
-        ndim=ndim_form(iform)
-
-        DO site=1,nsite; IF(.not.mask_form(site,iform))CYCLE   ! try to change update phi on each block-site
-          
-          oldphi=phi(site,time,i)
-          newphi=oldphi+drand_sym()*dphi(i)
-
-          IF(ndim==1)THEN
-            delta(1,1)=expf_E(1,iform)**(newphi-oldphi)-1d0
-          ELSE
-            DO a=1,ndim
-              DO b=1,ndim
-                delta(a,b)=sum(expf_U(a,1:ndim,iform)*expf_E(1:ndim,iform)**(newphi-oldphi)*expf_Udag(1:ndim,b,iform))
-              END DO
-              delta(a,a)=delta(a,a)-1d0
-            END DO
-          END IF
-
-          IF(ndim==1)THEN
-            ratio=1d0+(1d0-g(site,site))*delta(1,1)
-            ratiomat(1,1)=ratio
-          ELSE
-            DO a=1,ndim
-              DO b=1,ndim
-                gtmp(a,b)=g(nb_form(site,a,iform),nb_form(site,b,iform))
-              END DO
-            END DO
-            ratiomat(1:ndim,1:ndim)=delta(1:ndim,1:ndim)-matmul(gtmp(1:ndim,1:ndim),delta(1:ndim,1:ndim))
-            DO a=1,ndim
-              ratiomat(a,a)=ratiomat(a,a)+1d0
-            END DO
-            ratio=det(ndim,ratiomat(1:ndim,1:ndim))
-          END IF
-          CALL acceptprob_phi(ratio,newphi,site,time,i)
-          
-          Ntotal_phi(i)=Ntotal_phi(i)+1
-          IF(drand()>abs(ratio))CYCLE
-          Naccept_phi(i)=Naccept_phi(i)+1
-
-          currentphase=currentphase*ratio/abs(ratio)     ! obtain the phase of the current 'weight'
-          
-          ! update Green's function based on Dyson equation
-          IF(ndim==1)THEN
-            gtmp=g
-            DO j=1,nsite
-              delta_ja=0d0
-              IF(j==site)delta_ja=1d0
-              gtmp(j,:)=gtmp(j,:)+(g(j,site)-delta_ja)*delta(1,1)/ratiomat(1,1)*g(site,:)
-            END DO
-            g=gtmp
-          ELSE
-            CALL inverse(ndim,ratiomat(1:ndim,1:ndim))
-            delta(1:ndim,1:ndim)=matmul(delta(1:ndim,1:ndim),ratiomat(1:ndim,1:ndim))
-            gtmp=g
-            DO j=1,nsite
-              DO a=1,ndim; sitea=nb_form(site,a,iform)
-                delta_ja=0d0
-                IF(j==sitea) delta_ja=1d0
-                DO b=1,ndim; siteb=nb_form(site,b,iform)
-                  gtmp(j,:)=gtmp(j,:)+(g(j,sitea)-delta_ja)*delta(a,b)*g(siteb,:)
-                END DO
-              END DO
-            END DO
-            g=gtmp
-          END IF
-          phi(site,time,i)=newphi
-
-        END DO
-
-        ! udpate Green's function by exp(phi*F)*G*exp(-phi*F)
-        CALL evolve_left_phi(time,i,g,nsite)
-        CALL inv_evolve_right_phi(time,i,g,nsite)
-      
-      END DO
-
-    END DO
-  
-  END SUBROUTINE
-
-  !> calculate T=0 Green's function from definition, using QR decomposition stabilization algorithm.
-  SUBROUTINE update_scratch_T0(time)
-    IMPLICIT NONE
-    INTEGER, INTENT(IN) :: time
-    INTEGER flag,p,i
-    COMPLEX(8) t(nelec,nelec),lmat(nelec,nsite),rmat(nsite,nelec),gfast(nsite,nsite)!,tmp(nsite,nsite)
-      
-      gfast=g
-      
-      lmat=conjg(transpose(slater))
-      CALL zlq(nelec,nsite,lmat,t)
-      flag=0
-      DO p=ntime,time,-1
-        CALL evolve_right(p,lmat,nelec)
-        flag=flag+1
-        IF(flag/=ngroup)CYCLE
-        flag=0
-        CALL zlq(nelec,nsite,lmat,t)
-      END DO
-
-      rmat=slater
-      CALL zqr(nsite,nelec,rmat,t)
-      flag=0
-      DO p=1,time-1
-        CALL evolve_left(p,rmat,nelec)
-        flag=flag+1
-        IF(flag/=ngroup)CYCLE
-        flag=0
-        CALL zqr(nsite,nelec,rmat,t)
-      END DO
-
-      t=matmul(lmat,rmat)
-      !CALL zgemm('n','n',nelec,nelec,nsite,zone,lmat,nelec,rmat,nsite,zzero,t,nelec)
-      CALL inverse(nelec,t)
-
-      g=-matmul(rmat,matmul(t,lmat))
-      !CALL zgemm('n','n',nelec,nsite,nelec,zone,t,nelec,lmat,nelec,zzero,tmp,nelec)
-      !CALL zgemm('n','n',nsite,nsite,nelec,zmone,rmat,nsite,tmp,nelec,zzero,g,nsite)
-
-      DO i=1,nsite
-        g(i,i)=g(i,i)+1d0
-      END DO
-      
-      IF(time>1)THEN
-        gfast=matmul(matmul(expk,gfast),inv_expk)
-        err_fast=max(maxval(abs(gfast-g)),err_fast)
-      END IF
-  
-  END SUBROUTINE
-
-  !> calculate T>0 Green's function from definition, using QDR decomposition stabilization algorithm.
-  SUBROUTINE update_scratch(time)
-    IMPLICIT NONE
-    INTEGER, INTENT(IN) :: time
-    INTEGER d,flag,p0,p,i
-    COMPLEX(8) dvec(nsite),qmat(nsite,nsite),rmat(nsite,nsite),gtmp(nsite,nsite),gfast(nsite,nsite)
-      
-      gfast=g
-
-      d=nsite
-      
-      dvec=1d0
-      qmat=0d0
-      g=0d0
-      DO i=1,d
-        qmat(i,i)=1d0
-        g(i,i)=1d0
-      END DO
-      
-      flag=0
-      DO p0=time,ntime+time-1
-        p=p0;IF(p>ntime)p=p-ntime
-        CALL evolve_left(p,qmat,d)
-        flag=flag+1
-        IF(flag/=ngroup)CYCLE
-        flag=0
-        DO i=1,d
-          qmat(:,i)=qmat(:,i)*dvec(i)
-        END DO
-        CALL zqdr(d,d,qmat,rmat,dvec)
-        gtmp=g
-        g=matmul(rmat,gtmp)
-        !CALL zgemm('n','n',d,d,d,zone,rmat,d,gtmp,d,zzero,g,d)
-      END DO
-      
-      CALL inverse(d,qmat)
-      DO i=1,d
-        g(:,i)=dvec(:)*g(:,i)
-      END DO
-      g=g+qmat
-      CALL inverse(d,g)
-      gtmp=g
-      g=matmul(gtmp,qmat)
-      !CALL zgemm('n','n',d,d,d,zone,gtmp,d,qmat,d,zzero,g,d)
-
-    IF(time>1)THEN  ! when time=1, we may come through a global update, then the following fast update has no meaning
-      gfast=matmul(matmul(expk,gfast),inv_expk)
-      err_fast=max(maxval(abs(gfast-g)),err_fast)
-    END IF
-  
-  END SUBROUTINE
-
   !> save variables temporarily in case of unexpected break off.
   SUBROUTINE tmpout(ith,mcs)
     IMPLICIT NONE
     INTEGER, INTENT(IN) :: ith,mcs
     CHARACTER*4 cid
+            
+            IF(id==0)THEN
+              ! temporirally output the running status
+              PRINT'(2i8,1a,1e13.6,1a,1e13.6,1a,1f15.2,1A,1e13.6)',ith,mcs,'     (', &
+              &  real(currentphase),',',aimag(currentphase),')',runtime(),'s     ',err_fast
+              err_fast=0d0
+              IF(nising>0)THEN
+                PRINT'(1a50,12f7.4)','ising acceptance rate of local update:', &
+                        & Naccept_ising(:)*1d0/(Ntotal_ising(:)+1d-30)
+                PRINT'(1a50,12f7.4)','ising acceptance rate of global update:', &
+                        & Naccept_ising_global(:)*1d0/(Ntotal_ising_global(:)+1d-30)
+              END IF
+              IF(nphi>0)THEN
+                PRINT'(1a50,12f7.4)','phi acceptance rate of local update:', &
+                        & Naccept_phi(:)*1d0/(Ntotal_phi(:)+1d-30)
+                PRINT'(1a50,12f7.4)','phi acceptance rate of global update:', &
+                        & Naccept_phi_global(:)*1d0/(Ntotal_phi_global(:)+1d-30)
+                PRINT*,'phi range:'
+                DO ifield=1,nphi
+                  IF(mask_phi(ifield)) PRINT'(1i4,1a46,4e15.4)',ifield,'  max(Re), min(Re), max(Im), min(Im):', &
+                  & maxval(real(phi(:,:,ifield))),minval(real(phi(:,:,ifield))), &
+                  & maxval(aimag(phi(:,:,ifield))),minval(aimag(phi(:,:,ifield)))
+                END DO
+              END IF
+              PRINT*,'-----------------------------------'
+            END IF
 
     WRITE(cid,'(1i4)') id
     
@@ -1143,6 +582,15 @@ CONTAINS
     END IF
   END SUBROUTINE
 
+  SUBROUTINE evolve_left_field(time,ifield,matrix,d,flv)
+    IMPLICIT NONE
+    
+    ndim=ndim_field(iform)
+  
+  END SUBROUTINE
+
+
+  
   SUBROUTINE evolve_left_phi(time,i,matrix,d)
   ! exp(phi*F)*B
     IMPLICIT NONE

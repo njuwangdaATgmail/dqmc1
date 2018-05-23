@@ -1,14 +1,66 @@
 !> calculate T=0 Green's function from definition, using QR decomposition stabilization algorithm.
+
+! save Bstring to accelerate (a cheap realization):
+!   Bstring(:,:,block)=
+
+
 SUBROUTINE update_scratch_T0(time)
   USE mod_dqmc_complex
   IMPLICIT NONE
   INTEGER, INTENT(IN) :: time
   INTEGER flag,p,i,flv
   COMPLEX(8) t(nelec,nelec),lmat(nelec,nsite),rmat(nsite,nelec),gfast(nsite,nsite)
-   
+
+  ! get the block index: [1,nscratch]->1, [nscratch+1,2*nscratch]->2,...
+  ! we come here only when mod(time-1,nscratch)==0
+  block=(time-1)/nscratch+1 
+
   DO flv=1,nflv
     
     gfast=g(:,:,flv)
+
+    
+    IF(block==1)THEN
+      
+      ! correspondingly, time=1
+      ! L=B(ntime)...B(1)
+      ! save Bstring(Nblock-1), BString(Nblock-2),...,Bstring(1)
+
+
+      lmat=conjg(transpose(slater(:,:,flv)))
+      CALL zldq(nelec,nsite,lmat,tri,dvec)     ! we can save ldq of slater
+      flag=0
+      DO p=ntime,1,-1
+        CALL evolve_right(p,lmat,nelec,flv,.false.)
+        flag=flag+1
+        IF(flag==ngroup)THEN
+          flag=0
+          DO i=1,nelec
+            lmat(i,:)=dvec(i)*lmat(i,:)
+          END DO
+          CALL zldq(nelec,nsite,lmat,t,dvec)
+          tri=matmul(tri,t)
+        END IF
+        IF(mod(p-1,nscratch)=0.and.p>1)THEN
+          pblock=(p-1)/nscratch
+          Bstring_Q(:,:,pblock)=transpose(lmat)
+          Bstring_D(:,pblock)=dvec
+          Bstring_R(:,:,pblock)=transpose(tri)
+        END IF
+      END DO
+
+      rmat=slater(:,:,flv)
+      CALL zqdr(nsite,nelec,rmat,tri,devc)    
+
+
+    ELSE
+
+      ! L=Bstring(block-1)
+      ! R=B(time-1)...B(time-nscratch)*[Bstring(1) or 1(if block==2)]
+      ! Bstring(1)=R
+
+    END IF
+
     
     lmat=conjg(transpose(slater(:,:,flv)))
     CALL zlq(nelec,nsite,lmat,t)

@@ -1,4 +1,4 @@
-!> do local update trying to update all ising and phi fields at each site and time
+!> do local update trying to update all auxiliary fields at each site and time
 SUBROUTINE dqmc_update_local(do_meas)
   USE mod_dqmc_complex
   IMPLICIT NONE
@@ -23,7 +23,9 @@ SUBROUTINE dqmc_update_local(do_meas)
 
       ! update Green's function by fast-update algorithm
       DO flv=1,nflv
-        g(:,:,flv)=matmul(matmul(expk(:,:,flv),g(:,:,flv)),inv_expk(:,:,flv))
+        CALL evolve_left_K(g(:,:,flv),nsite,flv,.false.,.false.)
+        CALL evolve_right_K(g(:,:,flv),nsite,flv,.true.,.false.)
+        !g(:,:,flv)=matmul(matmul(expk(:,:,flv),g(:,:,flv)),inv_expk(:,:,flv))
       END DO
 
     END IF
@@ -58,39 +60,43 @@ SUBROUTINE dqmc_update_local(do_meas)
       ! try to update i-th field on each (block-)site
       DO site=1,nsite; IF(.not.mask_field_site(site,ifield))CYCLE
         
+        ! record old configuration
         oldfield=field(site,time,i)
         
-        ! generate newphi by calling an external subroutine which also returns delta=exp(V'-V)-1
+        ! generate new configuration by calling an external subroutine which also returns delta=exp(V'-V)-1
         CALL generate_newfield(newfield,site,time,delta(1:ndim,1:ndim,1:nflv))
 
         ! calculate determinant ratio for each flavor
         IF(ndim==1)THEN
+          ratio=1d0
           DO flv=1,nflv
-            ratio(flv)=1d0+(1d0-g(site,site,flv))*delta(1,1,flv)
-            ratiomat(1,1,flv)=ratio(flv)
+            ratiomat(1,1,flv)=1d0+(1d0-g(site,site,flv))*delta(1,1,flv)
+            ratio=ratio*ratiomat(1,1,flv)
           END DO
         ELSE
+          ratio=1d0
           DO flv=1,nflv
-            DO a=1,ndim
-              DO b=1,ndim
-                gtmp(a,b)=g(nb_field(site,a,ifield),nb_field(site,b,ifield),flv)
+            DO a=1,ndim; sitea=nb_field(site,a,ifield)
+              DO b=1,ndim; siteb=nb_field(site,b,ifield)
+                gtmp(a,b)=g(sitea,siteb,flv)
               END DO
             END DO
             ratiomat(1:ndim,1:ndim,flv)=delta(1:ndim,1:ndim,flv)-matmul(gtmp(1:ndim,1:ndim),delta(1:ndim,1:ndim,flv))
             DO a=1,ndim
               ratiomat(a,a,flv)=ratiomat(a,a,flv)+1d0
             END DO
-            ratio(flv)=det(ndim,ratiomat(1:ndim,1:ndim,flv))
+            ratio=ratio*det(ndim,ratiomat(1:ndim,1:ndim,flv))
           END DO
         END IF
 
         ! calculate total accept probability externally
-        CALL acceptprob_local(ratio,newfield,site,time,ifield,rtot)
+        CALL acceptprob_local(ratio,newfield,site,time,ifield)
 
-        IF(abs(rtot)<1d0)THEN
-          paccept=abs(rtot)/(1+newMetro*abs(rtot))
+        ! correction of Methopolis ratio
+        IF(abs(ratio)<1d0)THEN
+          paccept=abs(ratio)/(1+newMetro*abs(ratio))
         ELSE
-          paccept=abs(rtot)/(newMetro+abs(rtot))
+          paccept=abs(ratio)/(newMetro+abs(ratio))
         END IF
         
         ! record the total number of tryings
@@ -103,7 +109,7 @@ SUBROUTINE dqmc_update_local(do_meas)
         Naccept_field(ifield)=Naccept_field(ifield)+1
         
         ! obtain the phase of the current configuration
-        currentphase=currentphase*rtot/abs(rtot)     
+        currentphase=currentphase*ratio/abs(ratio)     
         
         ! update Green's function based on Dyson equation
         IF(ndim==1)THEN
@@ -112,7 +118,7 @@ SUBROUTINE dqmc_update_local(do_meas)
             DO j=1,nsite
               delta_ja=0d0
               IF(j==site)delta_ja=1d0
-              gtmp(j,:)=gtmp(j,:)+(g(j,site,flv)-delta_ja)*delta(1,1)/ratiomat(1,1)*g(site,:,flv)
+              gtmp(j,:)=gtmp(j,:)+(g(j,site,flv)-delta_ja)*delta(1,1,flv)/ratiomat(1,1,flv)*g(site,:,flv)
             END DO
             g(:,:,flv)=gtmp
           END DO
@@ -123,8 +129,7 @@ SUBROUTINE dqmc_update_local(do_meas)
             gtmp=g(:,:,flv)
             DO j=1,nsite
               DO a=1,ndim; sitea=nb_field(site,a,ifield)
-                delta_ja=0d0
-                IF(j==sitea) delta_ja=1d0
+                delta_ja=0d0; IF(j==sitea) delta_ja=1d0
                 DO b=1,ndim; siteb=nb_field(site,b,ifield)
                   gtmp(j,:)=gtmp(j,:)+(g(j,sitea,flv)-delta_ja)*delta(a,b,flv)*g(siteb,:,flv)
                 END DO
@@ -134,17 +139,19 @@ SUBROUTINE dqmc_update_local(do_meas)
           END DO
         END IF
 
-        ! update phi to newphi
+        ! update field
         field(site,time,ifield)=newfield
 
-      END DO
+      END DO ! site-loop
 
       ! udpate Green's function by exp(phi*F)*G*exp(-phi*F)
-      CALL evolve_left_field(time,ifield,g,nsite)
-      CALL inv_evolve_right_field(time,ifield,g,nsite)
-    
-    END DO
+      DO flv=1,nflv
+        CALL evolve_left_V(time,ifield,g(:,:,flv),nsite,flv,.false.)
+        CALL evolve_right_V(time,ifield,g(:,:,flv),nsite,flv,.true.)
+      END DO
 
-  END DO
+    END DO ! ifield-loop
+
+  END DO ! time-loop
 
 END SUBROUTINE

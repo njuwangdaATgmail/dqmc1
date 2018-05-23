@@ -3,8 +3,7 @@
 ! + both discrete and continuous fields are treated in the same way 
 !   so that the core module is simpler
 ! + each field has a unique form
-! + BB...B are stored as Bstring to accelerate. A cheap realization::q
-
+! + BB...B are stored as Bstring to accelerate. A cheap realizaion:
 !     Bstring_0(:,:,i)=B(i*nscratch)*B(i*nscratch-1)*...*B(1) 
 !     Bstring_L(:,:,i)=B(ntime)*...*B(ntime-i*nscratch+1)
 ! + checkerboard algorithm for expk? maybe not so emergent
@@ -38,6 +37,9 @@ MODULE dqmc_complex
   COMPLEX(8), ALLOCATABLE :: inv_expk_half(:,:)   ! exp(dtau*K/2)
   COMPLEX(8), ALLOCATABLE :: slater(:,:)          ! (nsite,nelec), trial wave function
   COMPLEX(8), ALLOCATABLE :: g(:,:)               ! Green's function, (nsite,nsite)
+  COMPLEX(8), ALLOCATABLE :: Bstring_Q(:,:,:,:)       ! (nsite,nsite/nelec,nblock-1,nflv)
+  COMPLEX(8), ALLOCATABLE :: Bstring_D(:,:,:)       ! (nsite/nelec,nblock-1,nflv)
+  COMPLEX(8), ALLOCATABLE :: Bstring_R(:,:,:,:)       ! (nsite/nelec,nsite/nelec,nblock-1,nflv)
 
   INTEGER nising                                  ! descrete auxiliary fields
   LOGICAL, ALLOCATABLE :: mask_ising(:)           ! whether the ising field is simulated. Then we can write a general input file:
@@ -66,7 +68,8 @@ MODULE dqmc_complex
   COMPLEX(8), ALLOCATABLE :: expf_U(:,:,:)        ! (maxval(ndim_form),maxval(ndim_form),nform)
   COMPLEX(8), ALLOCATABLE :: expf_Udag(:,:,:)     ! (maxval(ndim_form),maxval(ndim_form),nform)
 
-  COMPLEX(8) :: currentphase=(1d0,0d0)            ! the phase of the current configuration
+  COMPLEX(8) :: currentphase  = (1d0,0d0)            ! the phase of the current configuration
+  REAL(8)    :: newMetro      = (0d0,0d0)            ! correction of Metropolis ratio
   INTEGER nbin              ! number of data bins. The covariance is calculated between different bins.
   INTEGER nwarmup           ! warmup steps, in unit of Monte Carlo steps (MCS)
   INTEGER nmeasure          ! MCS in each bin
@@ -235,7 +238,7 @@ CONTAINS
       DO i=1,n
         IF(i<oldising)THEN
           isingflip(i,oldising)=i
-        ELSEIF(i>oldising)THEN
+        ELSE IF(i>oldising)THEN
           isingflip(i-1,oldising)=i
         END IF
       END DO
@@ -471,379 +474,155 @@ CONTAINS
     mcs_start=mcs_start+1
 
   END SUBROUTINE
-
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! 
-! These following evolve subroutines are most time consuming.        !
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!  
-  SUBROUTINE evolve_left_ising(time,i,matrix,d)
-  ! exp(lam*F)*B
-    IMPLICIT NONE
-    INTEGER, INTENT(IN) :: time,i,d
-    INTEGER iform,ndim,site,a,b,sitea,siteb,newising
-    COMPLEX(8) matrix(nsite,d),gtmp(nsite,d)
-    iform=form_ising(i)
-    ndim=ndim_form(iform)
-    IF(ndim==1)THEN
-      DO site=1,nsite; IF(.not.mask_form(site,iform))CYCLE
-        newising=ising(site,time,i)
-        matrix(site,:)=expflam(1,1,newising,site,i)*matrix(site,:)
-      END DO
-    ELSE
-      DO site=1,nsite; IF(.not.mask_form(site,iform))CYCLE
-      gtmp=matrix
-        newising=ising(site,time,i)
-        DO a=1,ndim; sitea=nb_form(site,a,iform)
-          DO b=1,ndim; siteb=nb_form(site,b,iform)
-            gtmp(sitea,:)=gtmp(sitea,:)+(expflam(a,b,newising,site,i)-transfer(a==b,a))*matrix(siteb,:)
-          END DO
-        END DO
-      matrix=gtmp
-      END DO
-    END IF
-  END SUBROUTINE
-
-  SUBROUTINE evolve_right_ising(time,i,matrix,d)
-  ! matrix*exp(lam*F)
-    IMPLICIT NONE
-    INTEGER, INTENT(IN) :: time,i,d
-    INTEGER iform,ndim,site,a,b,sitea,siteb,newising
-    COMPLEX(8) matrix(d,nsite),gtmp(d,nsite)
-    iform=form_ising(i)
-    ndim=ndim_form(iform)
-    IF(ndim==1)THEN
-      DO site=1,nsite; IF(.not.mask_form(site,iform))CYCLE
-        newising=ising(site,time,i)
-        matrix(:,site)=matrix(:,site)*expflam(1,1,newising,site,i)
-      END DO
-    ELSE
-      DO site=1,nsite; IF(.not.mask_form(site,iform))CYCLE
-      gtmp=matrix
-        newising=ising(site,time,i)
-        DO a=1,ndim; sitea=nb_form(site,a,iform)
-          DO b=1,ndim; siteb=nb_form(site,b,iform)
-            gtmp(:,siteb)=gtmp(:,siteb)+matrix(:,sitea)*(expflam(a,b,newising,site,i)-transfer(a==b,a))
-          END DO
-        END DO
-      matrix=gtmp
-      END DO
-    END IF
-  END SUBROUTINE
-
-  SUBROUTINE inv_evolve_left_ising(time,i,matrix,d)
-  ! exp(-lam*F)*B
-    IMPLICIT NONE
-    INTEGER, INTENT(IN) :: time,i,d
-    INTEGER iform,ndim,site,a,b,sitea,siteb,newising
-    COMPLEX(8) matrix(nsite,d),gtmp(nsite,d)
-    iform=form_ising(i)
-    ndim=ndim_form(iform)
-    IF(ndim==1)THEN
-      DO site=1,nsite; IF(.not.mask_form(site,iform))CYCLE
-        newising=ising(site,time,i)
-        matrix(site,:)=matrix(site,:)/expflam(1,1,newising,site,i)
-      END DO
-    ELSE
-      DO site=1,nsite; IF(.not.mask_form(site,iform))CYCLE
-      gtmp=matrix
-        newising=ising(site,time,i)
-        DO a=1,ndim; sitea=nb_form(site,a,iform)
-          DO b=1,ndim; siteb=nb_form(site,b,iform)
-            gtmp(sitea,:)=gtmp(sitea,:)+(inv_expflam(a,b,newising,site,i)-transfer(a==b,a))*matrix(siteb,:)
-          END DO
-        END DO
-      matrix=gtmp
-      END DO
-    END IF
-  END SUBROUTINE
-
-  SUBROUTINE inv_evolve_right_ising(time,i,matrix,d)
-  ! matrix*exp(-lam*F)
-    IMPLICIT NONE
-    INTEGER, INTENT(IN) :: time,i,d
-    INTEGER iform,ndim,site,a,b,sitea,siteb,newising
-    COMPLEX(8) matrix(d,nsite),gtmp(d,nsite)
-    iform=form_ising(i)
-    ndim=ndim_form(iform)
-    IF(ndim==1)THEN
-      DO site=1,nsite; IF(.not.mask_form(site,iform))CYCLE
-        newising=ising(site,time,i)
-        matrix(:,site)=matrix(:,site)/expflam(1,1,newising,site,i)
-      END DO
-    ELSE
-      DO site=1,nsite; IF(.not.mask_form(site,iform))CYCLE
-      gtmp=matrix
-        newising=ising(site,time,i)
-        DO a=1,ndim; sitea=nb_form(site,a,iform)
-          DO b=1,ndim; siteb=nb_form(site,b,iform)
-            gtmp(:,siteb)=gtmp(:,siteb)+matrix(:,sitea)*(inv_expflam(a,b,newising,site,i)-transfer(a==b,a))
-          END DO
-        END DO
-      matrix=gtmp
-      END DO
-    END IF
-  END SUBROUTINE
-
-  SUBROUTINE evolve_left_field(time,ifield,matrix,d,flv)
-    IMPLICIT NONE
-    
-    ndim=ndim_field(iform)
   
-  END SUBROUTINE
-
-
   
-  SUBROUTINE evolve_left_phi(time,i,matrix,d)
-  ! exp(phi*F)*B
+  !
+  !---------------------------------------------------------------------------
+  !  The following 8 subroutines are provided to perform evolutions of a matrix.
+  !       evolve_left_K   : exp(K)*matrix
+  !       evolve_right_K  : matrix*exp(K)
+  !       evolve_left_V   : exp(V)*matrix
+  !       evolve_right_V  : matrix*exp(V)
+  !       evolve_left     : B*matrix
+  !       evolve_right    : matrix*B
+  !       evolve_left_2nd : B_2nd*matrix
+  !       evolve_right_2nd: matrix*B_2nd
+  !----------------------------------------------------
+  !
+  !> exp( +- (dtau, dtau/2)*K ) * matrix
+  SUBROUTINE evolve_left_K(matrix,d,flv,inv,half)
     IMPLICIT NONE
-    INTEGER, INTENT(IN) :: time,i,d
-    INTEGER iform,ndim,site,a,b,sitea,siteb
-    COMPLEX(8) matrix(nsite,d),gtmp(nsite,d),newphi,delta
-    iform=form_phi(i)
-    ndim=ndim_form(iform)
-    IF(ndim==1)THEN
-      DO site=1,nsite; IF(.not.mask_form(site,iform))CYCLE
-        newphi=phi(site,time,i)
-        matrix(site,:)=expf_E(1,iform)**newphi*matrix(site,:)
-      END DO
+    INTEGER, INTENT(IN) :: d,flv
+    COMPLEX(8) matrix(nsite,d)
+    LOGICAL, INTENT(IN) :: inv,half
+    IF(inv.and.half)THEN
+      matrix=matmul(inv_expk_half(:,:,flv),matrix)
+    ELSE IF(.not.inv.and.half)THEN
+      matrix=matmul(expk_half(:,:,flv),matrix)
+    ELSE IF(inv.and..not.half)THEN
+      matrix=matmul(inv_expk(:,:,flv),matrix)
     ELSE
-      DO site=1,nsite; IF(.not.mask_form(site,iform))CYCLE
-      gtmp=matrix
-        newphi=phi(site,time,i)
-        DO a=1,ndim; sitea=nb_form(site,a,iform)
-          DO b=1,ndim; siteb=nb_form(site,b,iform)
-            delta=sum(expf_U(a,1:ndim,iform)*expf_E(1:ndim,iform)**newphi*expf_Udag(1:ndim,b,iform))-transfer(a==b,a)
-            gtmp(sitea,:)=gtmp(sitea,:)+delta*matrix(siteb,:)
-          END DO
-        END DO
-        matrix=gtmp
-      END DO
-      !matrix=gtmp
+      matrix=matmul(expk(:,:,flv),matrix)
+    END IF
+  END SUBROUTINE
+  
+  !> matrix * exp( +- (dtau, dtau/2)*K )
+  SUBROUTINE evolve_right_K(matrix,d,flv,inv,half)
+    IMPLICIT NONE
+    INTEGER, INTENT(IN) :: d,flv
+    COMPLEX(8) matrix(d,nsite)
+    LOGICAL, INTENT(IN) :: inv,half
+    IF(inv.and.half)THEN
+      matrix=matmul(matrix,inv_expk_half(:,:,flv))
+    ELSE IF(.not.inv.and.half)THEN
+      matrix=matmul(matrix,expk_half(:,:,flv))
+    ELSE IF(inv.and..not.half)THEN
+      matrix=matmul(matrix,inv_expk(:,:,flv))
+    ELSE
+      matrix=matmul(matrix,expk(:,:,flv))
     END IF
   END SUBROUTINE
 
-  SUBROUTINE evolve_right_phi(time,i,matrix,d)
-  ! matrix*exp(phi*F)
+  !> exp( +- V) * matrix
+  SUBROUTINE evolve_left_V(time,ifield,matrix,d,flv,inv)
     IMPLICIT NONE
-    INTEGER, INTENT(IN) :: time,i,d
-    INTEGER iform,ndim,site,a,b,sitea,siteb
-    COMPLEX(8) matrix(d,nsite),gtmp(d,nsite),newphi,delta
-    iform=form_phi(i)
-    ndim=ndim_form(iform)
-    IF(ndim==1)THEN
-      DO site=1,nsite; IF(.not.mask_form(site,iform))CYCLE
-        newphi=phi(site,time,i)
-        matrix(:,site)=matrix(:,site)*expf_E(1,iform)**newphi
-      END DO
-    ELSE
-      DO site=1,nsite; IF(.not.mask_form(site,iform))CYCLE
-      gtmp=matrix
-        newphi=phi(site,time,i)
-        DO a=1,ndim; sitea=nb_form(site,a,iform)
-          DO b=1,ndim; siteb=nb_form(site,b,iform)
-            delta=sum(expf_U(a,1:ndim,iform)*expf_E(1:ndim,iform)**newphi*expf_Udag(1:ndim,b,iform))-transfer(a==b,a)
-            gtmp(:,siteb)=gtmp(:,siteb)+matrix(:,sitea)*delta
-          END DO
+    INTEGER, INTENT(IN) :: time,ifield,d,flv
+    LOGICAL, INTENT(IN) :: inv
+    INTEGER a,b,sitea,siteb
+    COMPLEX(8) matrix(nsite,d),expV(ndim_field(ifield),ndim_field(ifield))
+    COMPLEX(8) gtmp(ndim_field(ifield),d)
+    DO site=1,nsite; IF(.not.mask_field_site(site,ifield))CYCLE
+      CALL get_expV(site,time,ifield,flv,inv,expV)
+      IF(ndim_field(ifield)==1)THEN
+        matrix(site,:)=expV(1,1)*matrix(site,:)
+      ELSE
+        DO a=1,ndim_field(ifield); sitea=nb_field(site,a,ifield)
+          gtmp(a,:)=matrix(sitea,:)
         END DO
-      matrix=gtmp
-      END DO
-    END IF
+        gtmp=matmul(expV,gtmp)
+        DO a=1,ndim_field(ifield); sitea=nb_field(site,a,ifield)
+          matrix(sitea,:)=gtmp(a,:)
+        END DO
+      END IF
+    END DO
   END SUBROUTINE
-
-  SUBROUTINE inv_evolve_left_phi(time,i,matrix,d)
-  ! exp(-phi*F)*B
+  
+  !> matrix * exp( +- V)
+  SUBROUTINE evolve_right_V(time,ifield,matrix,d,flv,inv)
     IMPLICIT NONE
-    INTEGER, INTENT(IN) :: time,i,d
-    INTEGER iform,ndim,site,a,b,sitea,siteb
-    COMPLEX(8) matrix(nsite,d),gtmp(nsite,d),newphi,delta
-    iform=form_phi(i)
-    ndim=ndim_form(iform)
-    IF(ndim==1)THEN
-      DO site=1,nsite; IF(.not.mask_form(site,iform))CYCLE
-        newphi=phi(site,time,i)
-        matrix(site,:)=matrix(site,:)/expf_E(1,iform)**newphi
-      END DO
-    ELSE
-      DO site=1,nsite; IF(.not.mask_form(site,iform))CYCLE
-      gtmp=matrix
-        newphi=phi(site,time,i)
-        DO a=1,ndim; sitea=nb_form(site,a,iform)
-          DO b=1,ndim; siteb=nb_form(site,b,iform)
-            delta=sum(expf_U(a,1:ndim,iform)/expf_E(1:ndim,iform)**newphi*expf_Udag(1:ndim,b,iform))-transfer(a==b,a)
-            gtmp(sitea,:)=gtmp(sitea,:)+delta*matrix(siteb,:)
-          END DO
+    INTEGER, INTENT(IN) :: time,ifield,d,flv
+    LOGICAL, INTENT(IN) :: inv
+    INTEGER a,b,sitea,siteb
+    COMPLEX(8) matrix(d,nsite),expV(ndim_field(ifield),ndim_field(ifield))
+    COMPLEX(8) gtmp(d,ndim_field(ifield))
+    DO site=1,nsite; IF(.not.mask_field_site(site,ifield))CYCLE
+      CALL get_expV(site,time,ifield,flv,inv,expV)
+      IF(ndim_field(ifield)==1)THEN
+        matrix(:,site)=matrix(:,site)*expV(1,1)
+      ELSE
+        DO a=1,ndim_field(ifield); sitea=nb_field(site,a,ifield)
+          gtmp(:,a)=matrix(:,sitea)
         END DO
-      matrix=gtmp
-      END DO
-    END IF
-  END SUBROUTINE
-
-  SUBROUTINE inv_evolve_right_phi(time,i,matrix,d)
-  ! matrix*exp(-phi*F)
-    IMPLICIT NONE
-    INTEGER, INTENT(IN) :: time,i,d
-    INTEGER iform,ndim,site,a,b,sitea,siteb
-    COMPLEX(8) matrix(d,nsite),gtmp(d,nsite),newphi,delta
-    iform=form_phi(i)
-    ndim=ndim_form(iform)
-    IF(ndim==1)THEN
-      DO site=1,nsite; IF(.not.mask_form(site,iform))CYCLE
-        newphi=phi(site,time,i)
-        matrix(:,site)=matrix(:,site)/expf_E(1,iform)**newphi
-      END DO
-    ELSE
-      DO site=1,nsite; IF(.not.mask_form(site,iform))CYCLE
-      gtmp=matrix
-        newphi=phi(site,time,i)
-        DO a=1,ndim; sitea=nb_form(site,a,iform)
-          DO b=1,ndim; siteb=nb_form(site,b,iform)
-            delta=sum(expf_U(a,1:ndim,iform)/expf_E(1:ndim,iform)**newphi*expf_Udag(1:ndim,b,iform))-transfer(a==b,a)
-            gtmp(:,siteb)=gtmp(:,siteb)+matrix(:,sitea)*delta
-          END DO
+        gtmp=matmul(gtmp,expV)
+        DO a=1,ndim_field(ifield); sitea=nb_field(site,a,ifield)
+          matrix(:,sitea)=gtmp(:,a)
         END DO
-      matrix=gtmp
-      END DO
-    END IF
+      END IF
+    END DO
   END SUBROUTINE
-
-  SUBROUTINE evolve_left(time,matrix,d)
+  
   ! B(time)*matrix
+  SUBROUTINE evolve_left(time,matrix,d,flv,inv)
     IMPLICIT NONE
-    INTEGER, INTENT(IN) :: time,d
-    INTEGER i
-    COMPLEX(8) matrix(nsite,d),gtmp(nsite,d)
-    gtmp=matrix
-    DO i=1,nising;
-      IF(mask_ising(i))CALL evolve_left_ising(time,i,gtmp,d)
+    INTEGER, INTENT(IN) :: time,d,flv
+    LOGICAL, INTENT(IN) :: inv,half
+    COMPLEX(8) matrix(nsite,d)
+    INTEGER ifield
+    DO ifield=1,nfield
+      CALL evolve_left_V(time,ifield,matrix,d,flv,inv)
     END DO
-    DO i=1,nphi
-      IF(mask_phi(i))CALL evolve_left_phi(time,i,gtmp,d)
-    END DO
-    matrix=matmul(expk,gtmp)
-    !CALL zgemm('n','n',nsite,d,nsite,zone,expk,nsite,gtmp,nsite,zzero,matrix,nsite)
-  END SUBROUTINE
-  
-  SUBROUTINE evolve_right(time,matrix,d)
-  ! matrix*B(time)
-    IMPLICIT NONE
-    INTEGER, INTENT(IN) :: time,d
-    INTEGER i
-    COMPLEX(8) matrix(d,nsite),gtmp(d,nsite)
-    gtmp=matmul(matrix,expk)
-    !CALL zgemm('n','n',d,nsite,nsite,zone,matrix,d,expk,nsite,zzero,gtmp,d)
-    DO i=nphi,1,-1
-      IF(mask_phi(i))CALL evolve_right_phi(time,i,gtmp,d)
-    END DO
-    DO i=nising,1,-1
-      IF(mask_ising(i))CALL evolve_right_ising(time,i,gtmp,d)
-    END DO
-    matrix=gtmp
-  END SUBROUTINE
-  
-  SUBROUTINE inv_evolve_left(time,matrix,d)
-  ! B(time)^{-1}*matrix
-    IMPLICIT NONE
-    INTEGER, INTENT(IN) :: time,d
-    INTEGER i
-    COMPLEX(8) matrix(nsite,d),gtmp(nsite,d)
-    gtmp=matmul(inv_expk,matrix)
-    !CALL zgemm('n','n',nsite,d,nsite,zone,inv_expk,nsite,matrix,nsite,zzero,gtmp,nsite)
-    DO i=nphi,1,-1
-      IF(mask_phi(i))CALL inv_evolve_left_phi(time,i,gtmp,d)
-    END DO
-    DO i=nising,1,-1
-      IF(mask_ising(i))CALL inv_evolve_left_ising(time,i,gtmp,d)
-    END DO
-    matrix=gtmp
-  END SUBROUTINE
-  
-  SUBROUTINE inv_evolve_right(time,matrix,d)
-  ! matrix*B(time)^{-1}
-    IMPLICIT NONE
-    INTEGER, INTENT(IN) :: time,d
-    INTEGER i
-    COMPLEX(8) matrix(d,nsite),gtmp(d,nsite)
-    gtmp=matrix
-    DO i=1,nising
-      IF(mask_ising(i))CALL inv_evolve_right_ising(time,i,gtmp,d)
-    END DO
-    DO i=1,nphi
-      IF(mask_phi(i))CALL inv_evolve_right_phi(time,i,gtmp,d)
-    END DO
-    matrix=matmul(gtmp,inv_expk)
-    !CALL zgemm('n','n',d,nsite,nsite,zone,gtmp,d,inv_expk,nsite,zzero,matrix,d)
+    CALL evolve_left_K(matrix,d,flv,inv,.false.)
   END SUBROUTINE
 
-  ! xxx_evolve_xxx_2nd() are used ONLY in calculations of time evolved Green's functions  
-  SUBROUTINE evolve_left_2nd(time,matrix,d)
-  ! B(time)*matrix
-    IMPLICIT NONE
-    INTEGER, INTENT(IN) :: time,d
-    INTEGER i
-    COMPLEX(8) matrix(nsite,d),gtmp(nsite,d)
-    gtmp=matmul(expk_half,matrix)
-    !CALL zgemm('n','n',nsite,d,nsite,zone,expk_half,nsite,matrix,nsite,zzero,gtmp,nsite)
-    DO i=1,nising
-      IF(mask_ising(i))CALL evolve_left_ising(time,i,gtmp,d)
-    END DO
-    DO i=1,nphi
-      IF(mask_phi(i))CALL evolve_left_phi(time,i,gtmp,d)
-    END DO
-    matrix=matmul(expk_half,gtmp)
-    !CALL zgemm('n','n',nsite,d,nsite,zone,expk_half,nsite,gtmp,nsite,zzero,matrix,nsite)
-  END SUBROUTINE
-  
-  SUBROUTINE evolve_right_2nd(time,matrix,d)
   ! matrix*B(time)
+  SUBROUTINE evolve_right(time,matrix,d,flv,inv)
     IMPLICIT NONE
-    INTEGER, INTENT(IN) :: time,d
-    INTEGER i
-    COMPLEX(8) matrix(d,nsite),gtmp(d,nsite)
-    gtmp=matmul(matrix,expk_half)
-    !CALL zgemm('n','n',d,nsite,nsite,zone,matrix,d,expk_half,nsite,zzero,gtmp,d)
-    DO i=nphi,1,-1
-      IF(mask_phi(i))CALL evolve_right_phi(time,i,gtmp,d)
+    INTEGER, INTENT(IN) :: time,d,flv
+    LOGICAL, INTENT(IN) :: inv,half
+    COMPLEX(8) matrix(d,nsite)
+    INTEGER ifield
+    CALL evolve_right_K(matrix,d,flv,inv,.false.)
+    DO ifield=nfield,1,-1
+      CALL evolve_right_V(time,ifield,matrix,d,flv,inv)
     END DO
-    DO i=nising,1,-1
-      IF(mask_ising(i))CALL evolve_right_ising(time,i,gtmp,d)
-    END DO
-    matrix=matmul(gtmp,expk_half)
-    !CALL zgemm('n','n',d,nsite,nsite,zone,gtmp,d,expk_half,nsite,zzero,matrix,d)
   END SUBROUTINE
-  
-  SUBROUTINE inv_evolve_left_2nd(time,matrix,d)
-  ! B(time)^{-1}*matrix
+
+  ! B_2nd(time)*matrix
+  SUBROUTINE evolve_left_2nd(time,matrix,d,flv,inv)
     IMPLICIT NONE
-    INTEGER, INTENT(IN) :: time,d
-    INTEGER i
-    COMPLEX(8) matrix(nsite,d),gtmp(nsite,d)
-    gtmp=matmul(inv_expk_half,matrix)
-    !CALL zgemm('n','n',nsite,d,nsite,zone,inv_expk_half,nsite,matrix,nsite,zzero,gtmp,nsite)
-    DO i=nphi,1,-1
-      IF(mask_phi(i))CALL inv_evolve_left_phi(time,i,gtmp,d)
+    INTEGER, INTENT(IN) :: time,d,flv
+    LOGICAL, INTENT(IN) :: inv,half
+    COMPLEX(8) matrix(nsite,d)
+    INTEGER ifield
+    CALL evolve_left_K(matrix,d,flv,inv,.true.)
+    DO ifield=1,nfield
+      CALL evolve_left_V(time,ifield,matrix,d,flv,inv)
     END DO
-    DO i=nising,1,-1
-      IF(mask_ising(i))CALL inv_evolve_left_ising(time,i,gtmp,d)
-    END DO
-    matrix=matmul(inv_expk_half,gtmp)
-    !CALL zgemm('n','n',nsite,d,nsite,zone,inv_expk_half,nsite,gtmp,nsite,zzero,matrix,nsite)
+    CALL evolve_left_K(matrix,d,flv,inv,.true.)
   END SUBROUTINE
-  
-  SUBROUTINE inv_evolve_right_2nd(time,matrix,d)
-  ! matrix*B(time)^{-1}
+
+  ! matrix*B_2nd(time)
+  SUBROUTINE evolve_right_2nd(time,matrix,d,flv,inv)
     IMPLICIT NONE
-    INTEGER, INTENT(IN) :: time,d
-    INTEGER i
-    COMPLEX(8) matrix(d,nsite),gtmp(d,nsite)
-    gtmp=matmul(matrix,inv_expk_half)
-    !CALL zgemm('n','n',d,nsite,nsite,zone,matrix,d,inv_expk_half,nsite,zzero,gtmp,d)
-    DO i=1,nising
-      IF(mask_ising(i))CALL inv_evolve_right_ising(time,i,gtmp,d)
+    INTEGER, INTENT(IN) :: time,d,flv
+    LOGICAL, INTENT(IN) :: inv,half
+    COMPLEX(8) matrix(d,nsite)
+    INTEGER ifield
+    CALL evolve_right_K(matrix,d,flv,inv,.true.)
+    DO ifield=nfield,1,-1
+      CALL evolve_right_V(time,ifield,matrix,d,flv,inv)
     END DO
-    DO i=1,nphi
-      IF(mask_phi(i))CALL inv_evolve_right_phi(time,i,gtmp,d)
-    END DO
-    matrix=matmul(gtmp,inv_expk_half)
-    !CALL zgemm('n','n',d,nsite,nsite,zone,gtmp,d,inv_expk_half,nsite,zzero,matrix,d)
+    CALL evolve_right_K(matrix,d,flv,inv,.true.)
   END SUBROUTINE
 
   FUNCTION runtime()
@@ -858,12 +637,14 @@ CONTAINS
     runtime=t1-t0
   END FUNCTION
 
+  !
   !--------------------------------------------------------------------!
   ! several usually used discrete Hubbard-Stratonovich transformation. !
   !   exp(-dtau*g*op^2)=...                                            !
   !--------------------------------------------------------------------!
-  SUBROUTINE HS1(ga,lam,a)  ! a=exp(-dtau*g)
+  !
   ! |eig(op)|=0,1, exact
+  SUBROUTINE HS1(ga,lam,a)  ! a=exp(-dtau*g)
     IMPLICIT NONE
     COMPLEX(8) ga,lam
     REAL(8) a
@@ -875,8 +656,8 @@ CONTAINS
     END IF
   END SUBROUTINE
 
-  SUBROUTINE HS2(ga1,lam1,ga2,lam2,a)  ! a=exp(-dtau*g)
   ! |eig(op)|=0,1,2,3, exact
+  SUBROUTINE HS2(ga1,lam1,ga2,lam2,a)  ! a=exp(-dtau*g)
     IMPLICIT NONE
     COMPLEX(8) ga1,ga2,lam1,lam2
     REAL(8) a,d
@@ -892,8 +673,8 @@ CONTAINS
     END IF
   END SUBROUTINE 
 
-  SUBROUTINE HSgeneral(ga1,lam1,ga2,lam2,a) ! a=-dtau*g
   ! |eig(op)|=any value, but approximate.
+  SUBROUTINE HSgeneral(ga1,lam1,ga2,lam2,a) ! a=-dtau*g
     IMPLICIT NONE
     COMPLEX(8) ga1,lam1,ga2,lam2
     REAL(8) a

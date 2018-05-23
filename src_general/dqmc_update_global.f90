@@ -10,7 +10,7 @@ SUBROUTINE dqmc_update_global(ifield)
   
   DO flv=1,nflv
 
-    ratio(flv)=1d0
+    ratio=1d0
 
   ! get det(P'BP) or det(1+B). In practice, we save their eigenvalues
     dvec=1d0

@@ -1,12 +1,13 @@
-! I am designing a new and simpler version:
-! + multi-flavor fermions are able to be simulated
-! + both discrete and continuous fields are treated in the same way
+! I am designing a new/simpler version:
+! + multi-flavor fermions are supportted
+! + both discrete and continuous fields are treated in the same way 
+!   so that the core module is simpler
 ! + each field has a unique form
-! + BB...B are stored to accelerate:
-!     in update_scratch(time), use BBB(time->time-nscratch) directly, 
-!     and then update BBB(time+nscratch->time) preparing for the next time of update_scratch
-! + For T=0 case, we need store BBB(1->time) and BBB(time+nscratch->ntime)
-! + checkerboard algorithm for expk?
+! + BB...B are stored as Bstring to accelerate. A cheap realization::q
+
+!     Bstring_0(:,:,i)=B(i*nscratch)*B(i*nscratch-1)*...*B(1) 
+!     Bstring_L(:,:,i)=B(ntime)*...*B(ntime-i*nscratch+1)
+! + checkerboard algorithm for expk? maybe not so emergent
 MODULE dqmc_complex
 
 #ifdef MPI

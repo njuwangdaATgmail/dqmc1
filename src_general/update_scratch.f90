@@ -1,9 +1,54 @@
+!> evaluate Green's function from definition directly using the Bstring technique
+!  to accelerate (a cheap realization, may not be the most efficient)
+!
+! For T>0 algorithm:
+! define Bstring(nsite,nsite,nblock)
+! when time=1 or block=1,
+!   used  :   none
+!   update:   Bstring(:,:,nblock)=BBB(nblock)
+!             Bstring(:,:,nblock-1)=BBB(nblock)*BBB(nblock-1)
+!             ...
+!             Bstring(:,:,2)=BBB(nblock)*...*BBB(2)
+!             Bstring(:,:,1)=BBB(nblock)*...*BBB(1)+1 which further gives the determinant
+! when time=nscratch+1 or block=2,
+!   used  :   Bstring(:,:,block)
+!   update:   Bstring(:,:,1)=BBB(1)
+!
+! when nblock>block>2,
+!   used  :   Bstring(:,:,block)
+!             Bstring(:,:,block-2)
+!   update:   Bstring(:,:,block-1)=BBB(block-1)*Bstring(block-2)
+! ...
+! when block=nblock
+!   used  :   Bstring(:,:,nblock)
+!             Bstring(:,:,nblock-2)
+!   update:   none
+!
+! For T=0 algorithm:
+! define Bstring(nsite,nelec,nblock)
+! when time=1 or block=1,
+!   used  :   none
+!   update:   Bstring(:,:,nblock)=transpose( P'*BBB(nblock) )
+!             Bstring(:,:,nblock-1)=transpose( P'*BBB(nblock)*BBB(nblock-1) )
+!             ...
+!             Bstring(:,:,2)=transpose( P'*BBB(nblock)*...*BBB(2) )
+!             Bstring(1:nelec,:,1)=P'*BBB(nblock)*...*BBB(1)*P which further gives the determinant
+! when time=nscratch+1 or block=2,
+!   used  :   Bstring(:,:,block)
+!   update:   Bstring(:,:,1)=BBB(1)*P
+!
+! when nblock>block>2,
+!   used  :   Bstring(:,:,block)
+!             Bstring(:,:,block-2)
+!   update:   Bstring(:,:,block-1)=BBB(block-1)*Bstring(block-2)
+! ...
+! when block=nblock
+!   used  :   Bstring(:,:,nblock)
+!             Bstring(:,:,nblock-2)
+!   update:   none
+!
+
 !> calculate T=0 Green's function from definition, using QR decomposition stabilization algorithm.
-
-! save Bstring to accelerate (a cheap realization):
-!   Bstring(:,:,block)=
-
-
 SUBROUTINE update_scratch_T0(time)
   USE mod_dqmc_complex
   IMPLICIT NONE

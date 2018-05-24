@@ -16,10 +16,6 @@ MODULE dqmc_complex
   USE matrixlib
   USE measpool
 
-  COMPLEX(8), PARAMETER, PRIVATE :: zone=(1d0,0d0)
-  COMPLEX(8), PARAMETER, PRIVATE :: zmone=(-1d0,0d0)
-  COMPLEX(8), PARAMETER, PRIVATE :: zzero=(0d0,0d0)
-
   LOGICAL :: restart                = .false.   ! restart mode or not
   INTEGER :: ith_start              = 0         ! start from a given bin
   INTEGER :: mcs_start              = 1         ! start from a given MC step
@@ -90,18 +86,13 @@ MODULE dqmc_complex
 
   REAL(8), PRIVATE :: err_fast      ! difference between scratch and fast-update
   REAL(8), PRIVATE :: t0            ! used to save starting time, in order to obtain running time
-  !INTEGER(8), PRIVATE :: Ntotal=0   ! total number of tries to update locally
-  !INTEGER(8), PRIVATE :: Naccept=0  ! total number of accepted tries
-  INTEGER(8), ALLOCATABLE, PRIVATE :: Ntotal_ising(:)
-  INTEGER(8), ALLOCATABLE, PRIVATE :: Ntotal_phi(:)
-  INTEGER(8), ALLOCATABLE, PRIVATE :: Naccept_ising(:)
-  INTEGER(8), ALLOCATABLE, PRIVATE :: Naccept_phi(:)
-  INTEGER(8), ALLOCATABLE, PRIVATE :: Ntotal_ising_global(:)
-  INTEGER(8), ALLOCATABLE, PRIVATE :: Ntotal_phi_global(:)
-  INTEGER(8), ALLOCATABLE, PRIVATE :: Naccept_ising_global(:)
-  INTEGER(8), ALLOCATABLE, PRIVATE :: Naccept_phi_global(:)
+  
+  INTEGER(8), ALLOCATABLE, PRIVATE :: Ntotal_field(:)
+  INTEGER(8), ALLOCATABLE, PRIVATE :: Naccept_field(:)
+  INTEGER(8), ALLOCATABLE, PRIVATE :: Ntotal_field_global(:)
+  INTEGER(8), ALLOCATABLE, PRIVATE :: Naccept_field_global(:)
 
-  PRIVATE :: dqmc_update, runtime
+  PRIVATE :: dqmc_update_local,dqmc_update_global,runtime_,tmpout_
 
 CONTAINS
 
@@ -127,7 +118,7 @@ CONTAINS
     CALL init()
     
     ! internal initialization, set remaining parameters
-    CALL init_internal()  
+    CALL init_()  
 
     DO ith=ith_start,nbin
 
@@ -145,7 +136,10 @@ CONTAINS
           CALL dqmc_update_local(.false.)  
           
           ! output information to screen and save work sapce into hardware
-          IF(mod(mcs,ntmpout)==0) CALL tmpout(ith,mcs)
+          IF(mod(mcs,ntmpout)==0)THEN
+            CALL tmpout_(ith,mcs)
+            CALL tmpout()
+          END IF
 
         END DO ! DO mcs=mcs_start,nwarmup
 
@@ -169,7 +163,10 @@ CONTAINS
             CALL dqmc_update_local(.false.)
           END IF
           
-          IF(mod(mcs,ntmpout)==0) CALL tmpout(ith,mcs)
+          IF(mod(mcs,ntmpout)==0)THEN
+            CALL tmpout_(ith,mcs)
+            CALL tmpout()
+          END IF
         
         END DO  ! DO mcs=mcs_start,nmeasure*ninterval
         
@@ -199,164 +196,10 @@ CONTAINS
       PRINT*,'Job is done with',nd,' cores.'
     END IF
 
-  END SUBROUTINE
+  END SUBROUTINE dqmc_driver
 
-  !> initialize ising configuration randomly
-  SUBROUTINE init_ising_random()
-    IMPLICIT NONE
-    INTEGER ifield,time,site
-    ising=0
-    DO ifield=1,nising; IF(.not.mask_ising(ifield))CYCLE
-      DO time=1,ntime
-        DO site=1,nsite
-          IF(mask_form(site,form_ising(ifield))) ising(site,time,ifield)=irand(isingmax(ifield))+1
-        END DO
-      END DO
-    END DO
-  END SUBROUTINE
-
-  !> initialize phi configuration randomly
-  SUBROUTINE init_phi_random()
-    IMPLICIT NONE
-    INTEGER ifield,time,site
-    phi=0d0
-    DO ifield=1,nphi; IF(.not.mask_phi(ifield))CYCLE
-      DO time=1,ntime
-        DO site=1,nsite
-          IF(mask_form(site,form_phi(ifield))) phi(site,time,ifield)=drand_sym()*dphi(ifield)
-        END DO
-      END DO
-    END DO
-  END SUBROUTINE
-
-  !> set isingflip
-  SUBROUTINE set_isingflip()
-    IMPLICIT NONE
-    INTEGER n,oldising,i
-    n=maxval(isingmax)
-    IF(.not.allocated(isingflip))ALLOCATE(isingflip(n-1,n))
-    DO oldising=1,n
-      DO i=1,n
-        IF(i<oldising)THEN
-          isingflip(i,oldising)=i
-        ELSE IF(i>oldising)THEN
-          isingflip(i-1,oldising)=i
-        END IF
-      END DO
-    END DO
-  END SUBROUTINE
-
-  !> set expf_E, expf_U, expf_Udag, ie U*exp(E)*Udag=exp(fmat) from fmat
-  SUBROUTINE set_expf()
-    IMPLICIT NONE
-    INTEGER iform,ndim
-    IF(.not.allocated(expf_E))ALLOCATE(expf_E(maxval(ndim_form),nform))
-    IF(.not.allocated(expf_U))ALLOCATE(expf_U(maxval(ndim_form),maxval(ndim_form),nform))
-    IF(.not.allocated(expf_Udag))ALLOCATE(expf_Udag(maxval(ndim_form),maxval(ndim_form),nform))
-    DO iform=1,nform
-      ndim=ndim_form(iform)
-      IF(ndim==1)THEN
-        expf_E(1,iform)=exp(1d0)
-        expf_U(1,1,iform)=1d0
-        expf_Udag(1,1,iform)=1d0
-      ELSE
-        expf_U(1:ndim,1:ndim,iform)=fmat(1:ndim,1:ndim,iform)
-        CALL eigen(ndim,expf_U(1:ndim,1:ndim,iform),expf_E(1:ndim,iform))
-        expf_E(1:ndim,iform)=exp(expf_E(1:ndim,iform))
-        expf_Udag(1:ndim,1:ndim,iform)=conjg(transpose(expf_U(1:ndim,1:ndim,iform)))
-      END IF
-    END DO
-  END SUBROUTINE
-
-  !> set exp(lam*fmat) and exp(-lam*fmat)
-  SUBROUTINE set_expflam()
-    IMPLICIT NONE
-    INTEGER ifield,iform,ndim,site,s,a,b
-    IF(.not.allocated(expflam))THEN
-      ALLOCATE(expflam(maxval(ndim_form),maxval(ndim_form),maxval(isingmax),nsite,nising))
-    END IF
-    IF(.not.allocated(inv_expflam))THEN
-      ALLOCATE(inv_expflam(maxval(ndim_form),maxval(ndim_form),maxval(isingmax),nsite,nising))
-    END IF
-    DO ifield=1,nising
-      iform=form_ising(ifield)
-      ndim=ndim_form(iform)
-      DO site=1,nsite
-        DO s=1,isingmax(ifield)
-          DO a=1,ndim
-            DO b=1,ndim
-              expflam(a,b,s,site,ifield)=sum(expf_U(a,1:ndim,iform) &
-              & *expf_E(1:ndim,iform)**lam_ising(s,site,ifield)*expf_Udag(1:ndim,b,iform))
-              inv_expflam(a,b,s,site,ifield)=sum(expf_U(a,1:ndim,iform) &
-              & /expf_E(1:ndim,iform)**lam_ising(s,site,ifield)*expf_Udag(1:ndim,b,iform))
-            END DO
-          END DO
-        END DO
-      END DO
-    END DO
-  END SUBROUTINE
-  
-  !> set exp(lam'*fmat)/exp(lam*fmat)-1
-  SUBROUTINE set_diff_ef()
-    IMPLICIT NONE
-    INTEGER ifield,ndim,site,a,b,d
-    IF(.not.allocated(diff_ef))THEN
-      ALLOCATE(diff_ef(maxval(ndim_form),maxval(ndim_form),maxval(isingmax),maxval(isingmax),nsite,nising))
-    END IF
-    DO ifield=1,nising
-      ndim=ndim_form(form_ising(ifield))
-      DO site=1,nsite
-        DO a=1,isingmax(ifield)
-          DO b=1,isingmax(ifield)
-            diff_ef(1:ndim,1:ndim,a,b,site,ifield)=matmul(expflam(1:ndim,1:ndim,a,site,ifield),&
-            & inv_expflam(1:ndim,1:ndim,b,site,ifield))
-            DO d=1,ndim
-              diff_ef(d,d,a,b,site,ifield)=diff_ef(d,d,a,b,site,ifield)-1d0
-            END DO
-          END DO
-        END DO
-      END DO
-    END DO
-  END SUBROUTINE
-  
-  !> set slater for T=0 dqmc
-  SUBROUTINE set_slater(kmat)
-    IMPLICIT NONE
-    COMPLEX(8) kmat(nsite,nsite)
-    REAL(8) eval(nsite)
-    IF(.not.proj)THEN
-      IF(id==0)PRINT*,'Slater is not needed in finite-T DQMC.'
-      RETURN
-    END IF
-    IF(.not.allocated(slater))ALLOCATE(slater(nsite,nelec))
-    CALL eigen(nsite,kmat,eval)
-    slater(:,:)=kmat(:,1:nelec)
-    slater=matmul(expk_half,slater)
-  END SUBROUTINE
-
-  !> set exp(K)=exp(-dtau*H0)
-  SUBROUTINE set_expk(kmat,dtau)
-    IMPLICIT NONE
-    COMPLEX(8) kmat(nsite,nsite)
-    REAL(8) eval(nsite),dtau
-    INTEGER i,j
-    IF(.not.allocated(expk))ALLOCATE(expk(nsite,nsite))
-    IF(.not.allocated(inv_expk))ALLOCATE(inv_expk(nsite,nsite))
-    IF(.not.allocated(expk_half))ALLOCATE(expk_half(nsite,nsite))
-    IF(.not.allocated(inv_expk_half))ALLOCATE(inv_expk_half(nsite,nsite))
-    CALL eigen(nsite,kmat,eval)
-    DO i=1,nsite
-      DO j=1,nsite
-        expk(i,j)=sum(kmat(i,:)*exp(-dtau*eval(:))*conjg(kmat(j,:)))
-        inv_expk(i,j)=sum(kmat(i,:)*exp(dtau*eval(:))*conjg(kmat(j,:)))
-        expk_half(i,j)=sum(kmat(i,:)*exp(-dtau*eval(:)/2)*conjg(kmat(j,:)))
-        inv_expk_half(i,j)=sum(kmat(i,:)*exp(dtau*eval(:)/2)*conjg(kmat(j,:)))
-      END DO
-    END DO
-  END SUBROUTINE
-
-  !> internal init subroutine, to set remaining parameters
-  SUBROUTINE init_internal()
+  ! internal initial subroutine, to set remaining parameters
+  SUBROUTINE init_()
     IMPLICIT NONE
     
     ! set up the random number seed on different cores
@@ -395,7 +238,7 @@ CONTAINS
 
     IF(restart)THEN
       !CALL set_pool(nbin,poolsize_r,poolsize_z)
-      call loadtmp()
+      call loadtmp_()
     ELSE
       CALL set_pool(nbin,poolsize_r,poolsize_z)
       currentphase=(1d0,0d0)
@@ -403,62 +246,53 @@ CONTAINS
       IF(nphi>0) CALL init_phi_random()
     END IF
 
-  END SUBROUTINE
-
+  END SUBROUTINE init_
   
-  !> save variables temporarily in case of unexpected break off.
-  SUBROUTINE tmpout(ith,mcs)
+  ! internal subroutine to output running status to screen 
+  ! and save variables temporarily in case of unexpected breakdown (e.g. power off)
+  SUBROUTINE tmpout_(ith,mcs)
     IMPLICIT NONE
     INTEGER, INTENT(IN) :: ith,mcs
     CHARACTER*4 cid
             
-            IF(id==0)THEN
-              ! temporirally output the running status
-              PRINT'(2i8,1a,1e13.6,1a,1e13.6,1a,1f15.2,1A,1e13.6)',ith,mcs,'     (', &
-              &  real(currentphase),',',aimag(currentphase),')',runtime(),'s     ',err_fast
-              err_fast=0d0
-              IF(nising>0)THEN
-                PRINT'(1a50,12f7.4)','ising acceptance rate of local update:', &
-                        & Naccept_ising(:)*1d0/(Ntotal_ising(:)+1d-30)
-                PRINT'(1a50,12f7.4)','ising acceptance rate of global update:', &
-                        & Naccept_ising_global(:)*1d0/(Ntotal_ising_global(:)+1d-30)
-              END IF
-              IF(nphi>0)THEN
-                PRINT'(1a50,12f7.4)','phi acceptance rate of local update:', &
-                        & Naccept_phi(:)*1d0/(Ntotal_phi(:)+1d-30)
-                PRINT'(1a50,12f7.4)','phi acceptance rate of global update:', &
-                        & Naccept_phi_global(:)*1d0/(Ntotal_phi_global(:)+1d-30)
-                PRINT*,'phi range:'
-                DO ifield=1,nphi
-                  IF(mask_phi(ifield)) PRINT'(1i4,1a46,4e15.4)',ifield,'  max(Re), min(Re), max(Im), min(Im):', &
-                  & maxval(real(phi(:,:,ifield))),minval(real(phi(:,:,ifield))), &
-                  & maxval(aimag(phi(:,:,ifield))),minval(aimag(phi(:,:,ifield)))
-                END DO
-              END IF
-              PRINT*,'-----------------------------------'
-            END IF
+    ! temporirally output the running status
+    IF(id==0)THEN
+      PRINT'(2i8,1a,1e13.6,1a,1e13.6,1a,1f15.2,1A,1e13.6)',ith,mcs,'     (', &
+      &  real(currentphase),',',aimag(currentphase),')',runtime_(),'s     ',err_fast
+      err_fast=0d0
+      PRINT'(1a50,100f7.4)','acceptance rate of local update:', &
+      & Naccept_field(:)*1d0/(Ntotal_field(:)+1d-30)
+      PRINT'(1a50,100f7.4)','acceptance rate of global update:', &
+      & Naccept_field_global(:)*1d0/(Ntotal_field_global(:)+1d-30)
+      PRINT*,'field range:'
+      DO ifield=1,nfield
+        IF(mask_field(ifield)) PRINT'(1i4,1a46,4e15.4)',ifield,'  max(Re), min(Re), max(Im), min(Im):', &
+        & maxval(real(field(:,:,ifield))),minval(real(field(:,:,ifield))), &
+        & maxval(aimag(field(:,:,ifield))),minval(aimag(field(:,:,ifield)))
+      END DO
+      PRINT*,'-----------------------------------'
+    END IF
 
+    ! save QMC variables to files
     WRITE(cid,'(1i4)') id
-    
-    OPEN(81,FILE='tmpout.dat'//trim(adjustl(cid)),FORM='UNFORMATTED')
+    OPEN(81,FILE='tmpout_.dat'//trim(adjustl(cid)),FORM='UNFORMATTED')
     WRITE(81) ith,mcs
     WRITE(81) currentphase
     WRITE(81) g
     IF(nising>0) WRITE(81) ising,Ntotal_ising,Naccept_ising,Ntotal_ising_global,Naccept_ising_global
     IF(nphi>0) WRITE(81) phi,Ntotal_phi,Naccept_phi,Ntotal_phi_global,Naccept_phi_global
     CLOSE(81)
-
+    
     IF(ith>0)CALL save_pool()
 
-  END SUBROUTINE
+  END SUBROUTINE tmpout_
 
-  !> load variables from previous break point.
-  SUBROUTINE loadtmp()
+  ! internal subroutine to load variables from previous break point.
+  SUBROUTINE loadtmp_()
     IMPLICIT NONE
     CHARACTER*4 cid
     WRITE(cid,'(1i4)') id
-
-    OPEN(81,FILE='tmpout.dat'//trim(adjustl(cid)),FORM='UNFORMATTED')
+    OPEN(81,FILE='tmpout_.dat'//trim(adjustl(cid)),FORM='UNFORMATTED')
     READ(81) ith_start,mcs_start
     READ(81) currentphase
     READ(81) g
@@ -474,11 +308,22 @@ CONTAINS
 
     mcs_start=mcs_start+1
 
-  END SUBROUTINE
+  END SUBROUTINE loadtmp_
   
-  
+  ! internal function to get the running time
+  FUNCTION runtime_()
+    IMPLICIT NONE
+    REAL(8) runtime_,t1
+#ifdef MPI
+    IF(id==0)t1=mpi_wtime()
+#else
+    CALL cpu_time(t1)
+#endif
+    runtime_=t1-t0
+  END FUNCTION runtime_
+
   !
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !  The following 8 subroutines are provided to perform evolutions of a matrix.
   !       evolve_left_K   : exp(K)*matrix
   !       evolve_right_K  : matrix*exp(K)
@@ -488,7 +333,7 @@ CONTAINS
   !       evolve_right    : matrix*B
   !       evolve_left_2nd : B_2nd*matrix
   !       evolve_right_2nd: matrix*B_2nd
-  !----------------------------------------------------
+  !------------------------------------------------------------------------------
   !
   !> exp( +- (dtau, dtau/2)*K ) * matrix
   SUBROUTINE evolve_left_K(matrix,d,flv,inv,half)
@@ -505,7 +350,7 @@ CONTAINS
     ELSE
       matrix=matmul(expk(:,:,flv),matrix)
     END IF
-  END SUBROUTINE
+  END SUBROUTINE evolve_left_K
   
   !> matrix * exp( +- (dtau, dtau/2)*K )
   SUBROUTINE evolve_right_K(matrix,d,flv,inv,half)
@@ -522,7 +367,7 @@ CONTAINS
     ELSE
       matrix=matmul(matrix,expk(:,:,flv))
     END IF
-  END SUBROUTINE
+  END SUBROUTINE evolve_right_K
 
   !> exp( +- V) * matrix
   SUBROUTINE evolve_left_V(time,ifield,matrix,d,flv,inv)
@@ -546,7 +391,7 @@ CONTAINS
         END DO
       END IF
     END DO
-  END SUBROUTINE
+  END SUBROUTINE evolve_left_V
   
   !> matrix * exp( +- V)
   SUBROUTINE evolve_right_V(time,ifield,matrix,d,flv,inv)
@@ -570,39 +415,39 @@ CONTAINS
         END DO
       END IF
     END DO
-  END SUBROUTINE
+  END SUBROUTINE evolve_right_V
   
   ! B(time)*matrix
   SUBROUTINE evolve_left(time,matrix,d,flv,inv)
     IMPLICIT NONE
     INTEGER, INTENT(IN) :: time,d,flv
-    LOGICAL, INTENT(IN) :: inv,half
+    LOGICAL, INTENT(IN) :: inv
     COMPLEX(8) matrix(nsite,d)
     INTEGER ifield
     DO ifield=1,nfield
       CALL evolve_left_V(time,ifield,matrix,d,flv,inv)
     END DO
     CALL evolve_left_K(matrix,d,flv,inv,.false.)
-  END SUBROUTINE
+  END SUBROUTINE evolve_left
 
   ! matrix*B(time)
   SUBROUTINE evolve_right(time,matrix,d,flv,inv)
     IMPLICIT NONE
     INTEGER, INTENT(IN) :: time,d,flv
-    LOGICAL, INTENT(IN) :: inv,half
+    LOGICAL, INTENT(IN) :: inv
     COMPLEX(8) matrix(d,nsite)
     INTEGER ifield
     CALL evolve_right_K(matrix,d,flv,inv,.false.)
     DO ifield=nfield,1,-1
       CALL evolve_right_V(time,ifield,matrix,d,flv,inv)
     END DO
-  END SUBROUTINE
+  END SUBROUTINE evolve_right
 
   ! B_2nd(time)*matrix
   SUBROUTINE evolve_left_2nd(time,matrix,d,flv,inv)
     IMPLICIT NONE
     INTEGER, INTENT(IN) :: time,d,flv
-    LOGICAL, INTENT(IN) :: inv,half
+    LOGICAL, INTENT(IN) :: inv
     COMPLEX(8) matrix(nsite,d)
     INTEGER ifield
     CALL evolve_left_K(matrix,d,flv,inv,.true.)
@@ -610,13 +455,13 @@ CONTAINS
       CALL evolve_left_V(time,ifield,matrix,d,flv,inv)
     END DO
     CALL evolve_left_K(matrix,d,flv,inv,.true.)
-  END SUBROUTINE
+  END SUBROUTINE evolve_left_2nd
 
   ! matrix*B_2nd(time)
   SUBROUTINE evolve_right_2nd(time,matrix,d,flv,inv)
     IMPLICIT NONE
     INTEGER, INTENT(IN) :: time,d,flv
-    LOGICAL, INTENT(IN) :: inv,half
+    LOGICAL, INTENT(IN) :: inv
     COMPLEX(8) matrix(d,nsite)
     INTEGER ifield
     CALL evolve_right_K(matrix,d,flv,inv,.true.)
@@ -624,25 +469,17 @@ CONTAINS
       CALL evolve_right_V(time,ifield,matrix,d,flv,inv)
     END DO
     CALL evolve_right_K(matrix,d,flv,inv,.true.)
-  END SUBROUTINE
-
-  FUNCTION runtime()
-    IMPLICIT NONE
-    REAL(8) runtime
-    REAL(8) :: t1=0d0
-#ifdef MPI
-    IF(id==0)t1=mpi_wtime()
-#else
-    CALL cpu_time(t1)
-#endif
-    runtime=t1-t0
-  END FUNCTION
+  END SUBROUTINE evolve_right_2nd
 
   !
-  !--------------------------------------------------------------------!
-  ! several usually used discrete Hubbard-Stratonovich transformation. !
-  !   exp(-dtau*g*op^2)=...                                            !
-  !--------------------------------------------------------------------!
+  !--------------------------------------------------------------------
+  ! several usually used discrete Hubbard-Stratonovich transformation
+  ! HS1:
+  !   exp(-dtau*g*op^2) = ga*exp(lam*op) + ga*exp(-lam*op)
+  ! HS2, HSgeneral:
+  !   exp(-dtau*g*op^2) = ga1*exp(lam1*op) + ga1*exp(-lam1*op)
+  !                     + ga2*exp(lam2*op) + ga2*exp(-lam2*op)
+  !--------------------------------------------------------------------
   !
   ! |eig(op)|=0,1, exact
   SUBROUTINE HS1(ga,lam,a)  ! a=exp(-dtau*g)
@@ -655,7 +492,7 @@ CONTAINS
     ELSE
       lam=dcmplx(0d0,acos(a))
     END IF
-  END SUBROUTINE
+  END SUBROUTINE HS1
 
   ! |eig(op)|=0,1,2,3, exact
   SUBROUTINE HS2(ga1,lam1,ga2,lam2,a)  ! a=exp(-dtau*g)
@@ -672,7 +509,7 @@ CONTAINS
       lam1=DCMPLX(0d0,acos((a+2*a**3+a**5+(a**2-1)*d)/4))
       lam2=DCMPLX(0d0,acos((a+2*a**3+a**5-(a**2-1)*d)/4))
     END IF
-  END SUBROUTINE 
+  END SUBROUTINE HS2
 
   ! |eig(op)|=any value, but approximate.
   SUBROUTINE HSgeneral(ga1,lam1,ga2,lam2,a) ! a=-dtau*g
@@ -688,23 +525,8 @@ CONTAINS
       lam1=DCMPLX(0d0,sqrt(-a*2*(3d0-sqrt(6d0))))
       lam2=DCMPLX(0d0,sqrt(-a*2*(3d0+sqrt(6d0))))
     END IF
-  END SUBROUTINE
+  END SUBROUTINE HSgeneral
 
-  !> sort the array a(n) from large to small absulute values
-  SUBROUTINE ordering(n,a)
-    IMPLICIT NONE
-    INTEGER, INTENT(IN) :: n
-    INTEGER i,j
-    COMPLEX(8) a(n),tmp
-    DO j=n-1,1,-1
-      DO i=1,j
-        IF(abs(a(i))<abs(a(i+1)))THEN
-          tmp=a(i);a(i)=a(i+1);a(i+1)=tmp
-        END IF
-      END DO
-    END DO
-  END SUBROUTINE
-
-END MODULE
+END MODULE mod_dqmc_complex
 
 

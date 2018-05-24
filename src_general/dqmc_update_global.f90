@@ -2,11 +2,13 @@
 SUBROUTINE dqmc_update_global(ifield)
   IMPLICIT NONE
   INTEGER, INTENT(IN) :: ifield
-  INTEGER i,p,flag,j
+  INTEGER flv,ifield
   INTEGER, ALLOCATABLE :: ising_old(:,:),ising_new(:,:)
-  COMPLEX(8), ALLOCATABLE :: phi_old(:,:),phi_new(:,:)
-  COMPLEX(8) ratio(nflv),dvec(nsite),dvec_old(nsite)
-  COMPLEX(8) qmat(nsite,nsite),rmat(nsite,nsite),Bmat(nsite,nsite)
+  REAL(8) paccept
+  COMPLEX(8) oldfield(nsite,ntime),newfield(nsite,ntime)
+  COMPLEX(8) ratio(nflv),rtot
+  COMPLEX(8), ALLOCATABLE :: dvec(:,:),dvec_old(:,:)
+  COMPLEX(8), ALLOCATABLE :: dvec(:,:),dvec_old(:,:)
   
  
   ! calculate old determinant from scratch
@@ -108,4 +110,21 @@ SUBROUTINE dqmc_update_global(ifield)
   ! whether update_scratch useful
   scratch_global_useful=.true.
 
+CONTAINS
+  
+  !> sort the array a(n) from large to small absulute values
+  SUBROUTINE sort(n,a)
+    IMPLICIT NONE
+    INTEGER, INTENT(IN) :: n
+    INTEGER i,j
+    COMPLEX(8) a(n),tmp
+    DO j=n-1,1,-1
+      DO i=1,j
+        IF(abs(a(i))<abs(a(i+1)))THEN
+          tmp=a(i);a(i)=a(i+1);a(i+1)=tmp
+        END IF
+      END DO
+    END DO
+  END SUBROUTINE
+  
 END SUBROUTINE

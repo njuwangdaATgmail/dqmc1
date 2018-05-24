@@ -4,7 +4,8 @@ SUBROUTINE dqmc_update_local(do_meas)
   IMPLICIT NONE
   LOGICAL, INTENT(IN) :: do_meas
   INTEGER time,site,ifield,ndim,j,a,b,sitea,siteb,flv
-  COMPLEX(8) ratio,newfield,oldfield,delta_ja,gtmp(nsite,nsite)
+  REAL(8) paccept
+  COMPLEX(8) ratio(nflv),rtot,newfield,oldfield,delta_ja,gtmp(nsite,nsite)
   COMPLEX(8) delta(maxval(ndim_field),maxval(ndim_field),nflv)
   COMPLEX(8) ratiomat(maxval(ndim_field),maxval(ndim_field),nflv)
   
@@ -68,10 +69,9 @@ SUBROUTINE dqmc_update_local(do_meas)
 
         ! calculate determinant ratio for each flavor
         IF(ndim==1)THEN
-          ratio=1d0
           DO flv=1,nflv
             ratiomat(1,1,flv)=1d0+(1d0-g(site,site,flv))*delta(1,1,flv)
-            ratio=ratio*ratiomat(1,1,flv)
+            ratio(flv)=ratiomat(1,1,flv)
           END DO
         ELSE
           ratio=1d0
@@ -85,18 +85,18 @@ SUBROUTINE dqmc_update_local(do_meas)
             DO a=1,ndim
               ratiomat(a,a,flv)=ratiomat(a,a,flv)+1d0
             END DO
-            ratio=ratio*det(ndim,ratiomat(1:ndim,1:ndim,flv))
+            ratio(flv)=det(ndim,ratiomat(1:ndim,1:ndim,flv))
           END DO
         END IF
 
         ! calculate total accept probability externally
-        CALL acceptprob_local(ratio,newfield,site,time,ifield)
+        CALL acceptprob_local(ratio,newfield,site,time,ifield,rtot)
 
         ! correction of Methopolis ratio
-        IF(abs(ratio)<1d0)THEN
-          paccept=abs(ratio)/(1+newMetro*abs(ratio))
+        IF(abs(rtot)<1d0)THEN
+          paccept=abs(rtot)/(1d0+newMetro*abs(rtot))
         ELSE
-          paccept=abs(ratio)/(newMetro+abs(ratio))
+          paccept=abs(rtot)/(newMetro+abs(rtot))
         END IF
         
         ! record the total number of tryings
@@ -109,7 +109,7 @@ SUBROUTINE dqmc_update_local(do_meas)
         Naccept_field(ifield)=Naccept_field(ifield)+1
         
         ! obtain the phase of the current configuration
-        currentphase=currentphase*ratio/abs(ratio)     
+        currentphase=currentphase*rtot/abs(rtot)     
         
         ! update Green's function based on Dyson equation
         IF(ndim==1)THEN

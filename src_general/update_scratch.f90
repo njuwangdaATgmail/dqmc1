@@ -1,6 +1,7 @@
-!> evaluate Green's function from definition directly using the Bstring technique
-!  to accelerate (a cheap realization, may not be the most efficient)
+!> evaluate Green's function from definition directly 
+! Bstring technique is used to accelerate (a cheap realization, may not be the most efficient)
 !
+!------------------------------------------------------------------------------------------------
 ! For T>0 algorithm:
 ! define Bstring(nsite,nsite,nblock)
 ! when time=1 or block=1,
@@ -22,8 +23,8 @@
 ! when block=nblock
 !   used  :   Bstring(:,:,nblock)
 !             Bstring(:,:,nblock-2)
-!   update:   none
-!
+!   update:   Bstring(:,:,1)=BBB+1
+!-----------------------------------------------------------------------------------------------
 ! For T=0 algorithm:
 ! define Bstring(nsite,nelec,nblock)
 ! when time=1 or block=1,
@@ -45,101 +46,131 @@
 ! when block=nblock
 !   used  :   Bstring(:,:,nblock)
 !             Bstring(:,:,nblock-2)
-!   update:   none
-!
+!   update:   Bstring(:,:,1)=P'BBB*P
+!-------------------------------------------------------------------------------------------------
 
-!> calculate T=0 Green's function from definition, using QR decomposition stabilization algorithm.
+!> calculate T=0 Green's function from definition, using QDR decomposition stabilization algorithm.
 SUBROUTINE update_scratch_T0(time)
   USE mod_dqmc_complex
   IMPLICIT NONE
   INTEGER, INTENT(IN) :: time
-  INTEGER flag,p,i,flv
-  COMPLEX(8) t(nelec,nelec),lmat(nelec,nsite),rmat(nsite,nelec),gfast(nsite,nsite)
-
+  INTEGER block,flv,flag,p,i
+  COMPLEX(8) dvec(nelec),tri(nelec,nelec),tmat(nelec,nelec),gfast(nsite,nsite)
+  COMPLEX(8), ALLOCATABLE :: qmat(:,:)
+  
+  IF(scratch_global_useful)THEN
+    scratch_global_useful=.false.
+    RETURN
+  END IF
+ 
   ! get the block index: [1,nscratch]->1, [nscratch+1,2*nscratch]->2,...
   ! we come here only when mod(time-1,nscratch)==0
   block=(time-1)/nscratch+1 
 
   DO flv=1,nflv
     
+    ! save g to evaluate the error of fast-update
     gfast=g(:,:,flv)
-
     
     IF(block==1)THEN
+
+      ALLOCATE(qmat(nelec,nsite))
       
-      ! correspondingly, time=1
-      ! L=B(ntime)...B(1)
-      ! save Bstring(Nblock-1), BString(Nblock-2),...,Bstring(1)
+      ! tmat*dvec*qmat=P'
+      qmat=conjg(transpose(slater_Q(:,:,flv)))
+      dvec=conjg(slater_D(:,flv))
+      tmat=conjg(transpose(slater_R(:,:,flv)))
 
-
-      lmat=conjg(transpose(slater(:,:,flv)))
-      CALL zldq(nelec,nsite,lmat,tri,dvec)     ! we can save ldq of slater
       flag=0
       DO p=ntime,1,-1
-        CALL evolve_right(p,lmat,nelec,flv,.false.)
+        CALL evolve_right(p,qmat,nelec,flv,.false.)
         flag=flag+1
-        IF(flag==ngroup)THEN
-          flag=0
-          DO i=1,nelec
-            lmat(i,:)=dvec(i)*lmat(i,:)
+        IF(flag==ngroup.or.mod(p-1,nscratch)==0)THEN
+          DO i=1,nsite
+            qmat(:,i)=dvec(:)*qmat(:,i)
           END DO
-          CALL zldq(nelec,nsite,lmat,t,dvec)
-          tri=matmul(tri,t)
+          CALL ldq(nelec,nsite,qmat,tri,dvec)
+          tmat=matmul(tmat,tri)
+          flag=0
         END IF
-        IF(mod(p-1,nscratch)=0.and.p>1)THEN
-          pblock=(p-1)/nscratch
-          Bstring_Q(:,:,pblock)=transpose(lmat)
-          Bstring_D(:,pblock)=dvec
-          Bstring_R(:,:,pblock)=transpose(tri)
+        IF(mod(p-1,nscratch)==0.and.p>1)THEN
+          pblock=(p-1)/nscratch+1
+          Bstring_Q(:,:,pblock,flv)=transpose(qmat)
+          Bstring_D(:,pblock,flv)=dvec
+          Bstring_T(:,:,pblock,flv)=tmat
         END IF
       END DO
+     
+      !   g = 1 - Q_R * (Q_L*Q_R)^{-1} * Q_L
+      tri=matmul(qmat,slater_Q(:,:,flv))
+      CALL inverse(nelec,tri)
+      g(:,:,flv)=-matmul(matmul(slater_Q(:,:,flv),tri),qmat)
+      DO i=1,nsite
+        g(i,i,flv)=g(i,i,flv)+1d0
+      END DO
 
-      rmat=slater(:,:,flv)
-      CALL zqdr(nsite,nelec,rmat,tri,devc)    
+      ! Bstring_T(1)*Bstring_D(1)*Bstring_Q(1) = P'*BBB*P
+      DO i=1,nsite
+        qmat(:,i)=dvec(:)*qmat(:,i)
+      END DO
+      qmat(1:nelec,1:nelec)=matmul(qmat,slater(:,:,flv))
+      CALL ldq(nelec,nelec,qmat(1:nelec,1:nelec),tri,dvec)
+      Bstring_Q(1:nelec,1:nelec,1,flv)=qmat(1:nelec,1:nelec)
+      Bstring_D(:,1,flv)=dvec
+      Bstring_T(:,:,1,flv)=matmul(tmat,tri)
 
+      DEALLOCATE(qmat)
 
     ELSE
 
-      ! L=Bstring(block-1)
-      ! R=B(time-1)...B(time-nscratch)*[Bstring(1) or 1(if block==2)]
-      ! Bstring(1)=R
+      ALLOCATE(qmat(nsite,nelec))
+      
+      IF(block==2)THEN
+        ! qmat*dvec*tmat = slater
+        qmat=slater_Q(:,:,flv)
+        dvec=slater_D(:,flv)
+        tmat=slater_R(:,:,flv)
+      ELSE
+        ! qmat*dvec*tmat = Bstring(block-2)
+        qmat=Bstring_Q(:,:,block-2,flv)
+        dvec=Bstring_D(:,block-2,flv)
+        tmat=Bstring_T(:,:,block-2,flv)
+      END IF
+
+      flag=0
+      DO p=(block-2)*nscratch+1,(block-1)*nscratch
+        CALL evolve_left(p,qmat,nelec,flv,.false.)
+        flag=flag+1
+        IF(flag==ngroup.or.mod(p,nscratch)==0)THEN
+          DO i=1,nelec
+            qmat(:,i)=qmat(:,i)*dvec(i)
+          END DO
+          CALL qdr(nsite,nelec,qmat,tri,dvec)
+          tmat=matmul(tri,tmat)
+          flag=0
+        END IF
+      END DO
+      Bstring_Q(:,:,block-1,flv)=qmat
+      Bstring_D(:,block-1,flv)=dvec
+      Bstring_T(:,:,block-1,flv)=tmat
+
+      ! g = 1 - qmat*dvec*tmat * (BL_T*BL_D*BL_Q*qmat*dvec*tmat)^{-1} * BL_T*BL_D*BL_Q
+      !   = 1 - qmat * (BL_Q*qmat)^{-1} * BL_Q
+
+      tri=matmul(transpose(Bstring_Q(:,:,block,flv)),qmat)
+      CALL inverse(nelec,tri)
+      g(:,:,flv)=-matmul(matmul(qmat,tri),transpose(Bstring_Q(:,:,block,flv)))
+      DO i=1,nsite
+        g(i,i,flv)=g(i,i,flv)+1d0
+      END DO
+
+      DEALLOCATE(qmat)
 
     END IF
-
-    
-    lmat=conjg(transpose(slater(:,:,flv)))
-    CALL zlq(nelec,nsite,lmat,t)
-    flag=0
-    DO p=ntime,time,-1
-      CALL evolve_right(p,lmat,nelec,flv)
-      flag=flag+1
-      IF(flag/=ngroup)CYCLE
-      flag=0
-      CALL zlq(nelec,nsite,lmat,t)
-    END DO
-
-    rmat=slater(:,:,flv)
-    CALL zqr(nsite,nelec,rmat,t)
-    flag=0
-    DO p=1,time-1
-      CALL evolve_left(p,rmat,nelec,flv)
-      flag=flag+1
-      IF(flag/=ngroup)CYCLE
-      flag=0
-      CALL zqr(nsite,nelec,rmat,t)
-    END DO
-
-    t=matmul(lmat,rmat)
-    CALL inverse(nelec,t)
-
-    g(:,:,flv)=-matmul(rmat,matmul(t,lmat))
-
-    DO i=1,nsite
-      g(i,i,flv)=g(i,i,flv)+1d0
-    END DO
-    
+   
     IF(time>1)THEN
-      gfast=matmul(matmul(expk(:,:,flv),gfast),inv_expk(:,:,flv))
+      CALL evolve_left_K(gfast,nsite,flv,.false.,.false.)
+      CALL evolve_right_K(gfast,nsite,flv,.true.,.false.)
       err_fast=max(maxval(abs(gfast-g(:,:,flv))),err_fast)
     END IF
 
@@ -151,48 +182,141 @@ END SUBROUTINE
 SUBROUTINE update_scratch(time)
   IMPLICIT NONE
   INTEGER, INTENT(IN) :: time
-  INTEGER d,flag,p0,p,i,flv
-  COMPLEX(8) dvec(nsite),qmat(nsite,nsite),rmat(nsite,nsite),gtmp(nsite,nsite),gfast(nsite,nsite)
+  INTEGER block,flv,flag,p,i
+  COMPLEX(8) dvec(nsite),qmat(nsite,nsite),tmat(nsite,nsite),tri(nsite,nsite),gfast(nsite,nsite)
   
+  IF(scratch_global_useful)THEN
+    scratch_global_useful=.false.
+    RETURN
+  END IF
+ 
+  ! get the block index: [1,nscratch]->1, [nscratch+1,2*nscratch]->2,...
+  ! we come here only when mod(time-1,nscratch)==0
+  block=(time-1)/nscratch+1
+
   DO flv=1,nflv
 
     gfast=g(:,:,flv)
 
-    d=nsite
-    
-    dvec=1d0
-    qmat=0d0
-    g(:,:,flv)=0d0
-    DO i=1,d
-      qmat(i,i)=1d0
-      g(i,i,flv)=1d0
-    END DO
-    
-    flag=0
-    DO p0=time,ntime+time-1
-      p=p0;IF(p>ntime)p=p-ntime
-      CALL evolve_left(p,qmat,d,flv)
-      flag=flag+1
-      IF(flag/=ngroup)CYCLE
-      flag=0
-      DO i=1,d
-        qmat(:,i)=qmat(:,i)*dvec(i)
-      END DO
-      CALL zqdr(d,d,qmat,rmat,dvec)
-      g(:,:,flv)=matmul(rmat,g(:,:,flv))
-    END DO
-    
-    CALL inverse(d,qmat)
-    DO i=1,d
-      g(:,i,flv)=dvec(:)*g(:,i,flv)
-    END DO
-    g(:,:,flv)=g(:,:,flv)+qmat
-    CALL inverse(d,g(:,:,flv))
-    g(:,:,flv)=matmul(g(:,:,flv),qmat)
+    IF(block==1)THEN
 
-  IF(time>1)THEN  ! when time=1, we may come through a global update, then the following fast update has no meaning
-    gfast=matmul(matmul(expk(:,:,flv),gfast),inv_expk(:,:,flv))
-    err_fast=max(maxval(abs(gfast-g(:,:,flv))),err_fast)
-  END IF
+      ! tmat*dvec*qmat=1
+      qmat=0d0
+      dvec=1d0
+      tmat=0d0
+      DO i=1,nsite
+        qmat(i,i)=1d0
+        tmat(i,i)=1d0
+      END DO
+
+      flag=0
+      DO p=ntime,1,-1
+        CALL evolve_right(p,qmat,nsite,flv,.false.)
+        flag=flag+1
+        IF(flag==ngroup.or.mod(p-1,nscratch)==0)THEN
+          DO i=1,nsite
+            qmat(:,i)=dvec(:)*qmat(:,i)
+          END DO
+          CALL ldq(nsite,nsite,qmat,tri,dvec)
+          tmat=matmul(tmat,tri)
+          flag=0
+        END IF
+        IF(mod(p-1,nscratch)==0.and.p>1)THEN
+          pblock=(p-1)/nscratch+1
+          Bstring_Q(:,:,pblock,flv)=qmat
+          Bstring_D(:,pblock,flv)=dvec
+          Bstring_T(:,:,pblock,flv)=tmat
+        END IF
+      END DO
+
+      ! tmat*dvec*qmat = BBB
+      ! g^{-1}= BBB + 1 = ( tmat*dvec + qmat^{-1} ) * qmat
+
+      Bstring_Q(:,:,1,flv)=qmat
+      CALL inverse(nsite,qmat)
+      g(:,:,flv)=qmat
+      DO i=1,nsite
+        qmat(:,i)=qmat(:,i)+tmat(:,i)*dvec(i)
+      END DO
+      CALL ldq(nsite,nsite,qmat,tri,dvec)
+      Bstring_Q(:,:,1,flv)=matmul(qmat,Bstring_Q(:,:,1,flv))
+      Bstring_D(:,1,flv)=dvec
+      Bstring_T(:,:,1,flv)=tri
+      CALL inverse(nsite,tri)
+      CALL inverse(nsite,qmat)
+      DO i=1,nsite
+        tri(:,i)=tri(:,i)/dvec(:)
+      END DO
+      g(:,:,flv)=matmul(matmul(g(:,:,flv),qmat),tri)
+
+    ELSE
+
+      IF(block==2)THEN
+        ! tmat*dvec*qmat=1
+        qmat=0d0
+        dvec=1d0
+        tmat=0d0
+        DO i=1,nsite
+          qmat(i,i)=1d0
+          tmat(i,i)=1d0
+        END DO
+      ELSE
+        ! tmat*dvec*qmat=Bstring(block-2)
+        tmat=Bstring_T(:,:,block-2,flv)
+        qmat=Bstring_Q(:,:,block-2,flv)
+        dvec=Bstring_D(:,:,block-2,flv)
+      END IF
+
+      flag=0
+      DO p=(block-2)*nscratch+1,(block-1)*nscratch
+        CALL evolve_left(p,qmat,nsite,flv,.false.)
+        flag=flag+1
+        IF(flag==ngroup.or.mod(p,nscratch)==0)THEN
+          DO i=1,nsite
+            qmat(:,i)=qmat(:,i)*dvec(i)
+          END DO
+          CALL qdr(nsite,nsite,qmat,tri,dvec)
+          tmat=matmul(tri,tmat)
+          flag=0
+        END IF
+      END DO
+      Bstring_Q(:,:,block-1,flv)=qmat
+      Bstring_D(:,block-1,flv)=dvec
+      Bstring_T(:,:,block-1,flv)=tmat
+
+      ! g^{-1} = qmat*dvec*tmat*BL_T*BL_D_BL_Q + 1
+
+      tmat=matmul(tmat,Bstring_T(:,:,block,flv))
+      DO i=1,nsite
+        tmat(:,i)=dvec(:)*tmat(:,i)*Bstring_D(i,block,flv)
+      END DO
+      CALL qdr(nsite,nsite,tmat,tri,dvec)
+      qmat=matmul(qmat,tmat)
+      tri=matmul(tri,Bstring_Q(:,:,block,flv))
+
+      ! g^{-1} = qmat*dvec*tri + 1
+
+      CALL inverse(nsite,qmat)
+      g(:,:,flv)=qmat
+      DO i=1,nsite
+        qmat(:,i)=qmat(:,i)+dvec(:)*tri(:,i)
+      END DO
+      CALL qdr(nsite,nsite,qmat,tri,dvec)
+      CALL inverse(nsite,qmat)
+      CALL inverse(nsite,tri)
+      DO i=1,nsite
+        tri(:,i)=tri(:,i)/dvec(i)
+      END DO
+      g(:,:,flv)=matmul(tri,matmul(qmat,g(:,:,flv)))
+
+    END IF
+
+    IF(time>1)THEN  ! when time=1, we may come through a global update, then the following fast update has no meaning
+      CALL evolve_left_K(gfast,nsite,flv,.false.,.false.)
+      CALL evolve_right_K(gfast,nsite,flv,.true.,.false.)
+      err_fast=max(maxval(abs(gfast-g(:,:,flv))),err_fast)
+    END IF
+
+  END DO
 
 END SUBROUTINE

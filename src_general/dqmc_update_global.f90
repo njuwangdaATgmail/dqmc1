@@ -8,162 +8,104 @@ SUBROUTINE dqmc_update_global(ifield)
   COMPLEX(8) ratio(nflv),dvec(nsite),dvec_old(nsite)
   COMPLEX(8) qmat(nsite,nsite),rmat(nsite,nsite),Bmat(nsite,nsite)
   
+ 
+  ! calculate old determinant from scratch
+  IF(proj)THEN
+    CALL update_scratch_T0(1)
+  ELSE
+    CALL update_scratch(1)
+  END IF
+
+  ! save eigenvalues of the old determinant
   DO flv=1,nflv
 
-    ratio=1d0
+    IF(proj)THEN
 
-  ! get det(P'BP) or det(1+B). In practice, we save their eigenvalues
-    dvec=1d0
-    qmat=0d0
-    Bmat=0d0
-    DO i=1,nsite
-      qmat(i,i)=1d0
-      Bmat(i,i)=1d0
-    END DO
-    
-    flag=0
-    DO p=1,ntime
-      CALL evolve_left(p,qmat,nsite,flv)
-      flag=flag+1
-      IF(flag/=ngroup)CYCLE
-      flag=0
-      DO i=1,nsite
-        qmat(:,i)=qmat(:,i)*dvec(i)
-      END DO
-      CALL zqdr(nsite,nsite,qmat,rmat,dvec)
-      Bmat=matmul(rmat,Bmat)
-    END DO
-    ! B*...*B=qmat*dvec*Bmat
+      ratio(flv)=1d0/det(nelec,Bstring_Q(1:nelec,1:nelec,1,flv))
+      dvec_old(1:nelec,flv)=Bstring_D(1:nelec,1,flv)
+      CALL sort(nelec,dvec_old(1:nelec,flv))
 
-    IF(proj)THEN  !det(P'*B*P)
-    
-      qmat(1:nelec,1:nsite)=matmul(conjg(transpose(slater)),qmat)
-      rmat(1:nsite,1:nelec)=matmul(Bmat,slater)
-      DO i=1,nelec
-        DO j=1,nelec
-          Bmat(i,j)=sum(qmat(i,:)*dvec(:)*rmat(:,j))
-        END DO
-      END DO
-      CALL qdr(nelec,nelec,Bmat(1:nelec,1:nelec),rmat(1:nelec,1:nelec),dvec_old)
-      ratio(flv)=ratio(flv)/det(nelec,Bmat(1:nelec,1:nelec))
-      CALL ordering(nelec,dvec_old(1:nelec))
-  
-    ELSE   !det(1+B)
-    
-      ratio(flv)=ratio(flv)/det(nsite,qmat)
-      CALL inverse(nsite,qmat)
-      DO i=1,nsite
-        qmat(i,:)=qmat(i,:)+dvec(i)*Bmat(i,:)
-      END DO
-      CALL qdr(nsite,nsite,qmat,rmat,dvec_old)
-      ratio(flv)=ratio(flv)/det(nsite,qmat)
-      CALL ordering(nsite,dvec_old)
+    ELSE
+
+      ratio(flv)=1d0/det(nsite,Bstring_Q(1:nsite,1:nsite,1,flv))
+      dvec_old(1:nsite,flv)=Bstring_D(1:site,1,flv)
+      CALL sort(nsite,dvec_old(1:nsite,flv))
 
     END IF
-  
-  ! generate newising or newphi externally
-  IF(job=='ising')THEN
-    ALLOCATE(ising_old(nsite,ntime),ising_new(nsite,ntime))
-    ising_old=ising(:,:,ifield)
-    CALL generate_newising_global(ifield)
-  ELSE
-    ALLOCATE(phi_old(nsite,ntime),phi_new(nsite,ntime))
-    phi_old=phi(:,:,ifield)
-    CALL generate_newphi_global(ifield)
-  END IF
 
-  ! get new det(P'BP) or det(1+B)
-    dvec=1d0
-    qmat=0d0
-    Bmat=0d0
-    DO i=1,nsite
-      qmat(i,i)=1d0
-      Bmat(i,i)=1d0
-    END DO
-    
-    flag=0
-    DO p=1,ntime
-      CALL evolve_left(p,qmat,nsite)
-      flag=flag+1
-      IF(flag/=ngroup)CYCLE
-      flag=0
-      DO i=1,nsite
-        qmat(:,i)=qmat(:,i)*dvec(i)
-      END DO
-      CALL zqdr(nsite,nsite,qmat,rmat,dvec)
-      Bmat=matmul(rmat,Bmat)
-    END DO
-    ! B*...*B=qmat*dvec*Bmat
+  END DO
 
-  IF(proj)THEN  !det(P'*B*P)
-    
-    qmat(1:nelec,1:nsite)=matmul(conjg(transpose(slater)),qmat)
-    rmat(1:nsite,1:nelec)=matmul(Bmat,slater)
-    DO i=1,nelec
-      DO j=1,nelec
-        Bmat(i,j)=sum(qmat(i,:)*dvec(:)*rmat(:,j))
-      END DO
-    END DO
-    CALL qdr(nelec,nelec,Bmat(1:nelec,1:nelec),rmat(1:nelec,1:nelec),dvec)
-    ratio=ratio*det(nelec,Bmat(1:nelec,1:nelec))
-    CALL ordering(nelec,dvec(1:nelec))
-  
-  ELSE   !det(1+B)
-    
-    ratio=ratio*det(nsite,qmat)
-    CALL inverse(nsite,qmat)
-    DO i=1,nsite
-      qmat(i,:)=qmat(i,:)+dvec(i)*Bmat(i,:)
-    END DO
-    CALL qdr(nsite,nsite,qmat,rmat,dvec)
-    ratio=ratio*det(nsite,qmat)
-    CALL ordering(nsite,dvec)
+  ! save old field
+  oldfield=field(:,:,ifield)
 
-  END IF
+  ! generate new field
+  CALL generate_newfield_global(ifield)
 
-  ! get accept ratio from the determinant ratio externally
+  ! calculate new determinant from scratch
   IF(proj)THEN
-    DO i=1,nelec
-      ratio=ratio*dvec(i)/dvec_old(i)
-    END DO
+    CALL update_scratch_T0(1)
   ELSE
-    DO i=1,nsite
-      ratio=ratio*dvec(i)/dvec_old(i)
-    END DO
-  END IF
-  IF(job=='ising')THEN
-    ising_new(:,:)=ising(:,:,ifield)
-    ising(:,:,ifield)=ising_old(:,:)
-    CALL acceptprob_ising_global(ratio,ising_new,ifield)
-  ELSE  ! job='phi'
-    phi_new(:,:)=phi(:,:,ifield)
-    phi(:,:,ifield)=phi_old(:,:)
-    CALL acceptprob_phi_global(ratio,phi_new,ifield)
+    CALL update_scratch(1)
   END IF
   
-  ! if accepted, update ising or phi
-  ! Here, we don't need to update Green's function since we will 
-  ! always do that in the following step of local update
-  IF(job=='ising')THEN
-    Ntotal_ising_global(ifield)=Ntotal_ising_global(ifield)+1
+  ! get eigenvalues of the new determinant
+  DO flv=1,nflv
+
+    IF(proj)THEN
+
+      ratio(flv)=ratio(flv)*det(nelec,Bstring_Q(1:nelec,1:nelec,1,flv))
+      dvec(1:nelec,flv)=Bstring_D(1:nelec,1,flv)
+      CALL sort(nelec,dvec(1:nelec,flv))
+
+      DO i=1,nelec
+        ratio(flv)=ratio(flv)*dvec(i,flv)/dvec_old(i,flv)
+      END DO
+
+    ELSE
+
+      ratio(flv)=ratio(flv)*det(nsite,Bstring_Q(1:nsite,1:nsite,1,flv))
+      dvec(1:nsite,flv)=Bstring_D(1:site,1,flv)
+      CALL sort(nsite,dvec(1:nsite,flv))
+
+      DO i=1,nsite
+        ratio(flv)=ratio(flv)*dvec(i,flv)/dvec_old(i,flv)
+      END DO
+
+    END IF
+
+  END DO
+
+  ! get acceptance ratio
+  newfield=field(:,:,ifield)
+  field(:,:,ifield)=oldfield
+  CALL acceptprob_global(ratio,newfield,ifield,rtot)
+
+  ! correction of Metropolis ratio
+  IF(abs(rtot)<1d0)THEN
+    paccept=abs(rtot)/(1d0+newMetro*abs(rtot))
   ELSE
-    Ntotal_phi_global(ifield)=Ntotal_phi_global(ifield)+1
+    paccept=abs(rtot)/(newMetro+abs(rtot))
   END IF
 
-  IF(drand()>abs(ratio))RETURN
+  ! record the total number of tryings
+  Ntotal_field_global(ifield)=Ntotal_field_global(ifield)+1
+
+  ! whether update_scratch is useful
+  scratch_global_useful=.false.
   
-  IF(job=='ising')THEN
-    Naccept_ising_global(ifield)=Naccept_ising_global(ifield)+1
-  ELSE
-    Naccept_phi_global(ifield)=Naccept_phi_global(ifield)+1
-  END IF
+  ! accept the new configuration with probability paccept
+  IF(drand()>paccept)RETURN
+  
+  ! record the number of accepted tryings
+  Naccept_field_global(ifield)=Naccept_ising_global(ifield)+1
 
-  currentphase=currentphase*ratio/abs(ratio)
+  ! obtain the phase of the current configuration
+  currentphase=currentphase*rtot/abs(rtot)
 
-  IF(job=='ising')THEN
-    ising(:,:,ifield)=ising_new
-  ELSE
-    phi(:,:,ifield)=phi_new
-  END IF
+  ! update field
+  field(:,:,ifield)=newfield
+
+  ! whether update_scratch useful
+  scratch_global_useful=.true.
 
 END SUBROUTINE

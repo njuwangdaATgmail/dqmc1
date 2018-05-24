@@ -20,10 +20,11 @@ MODULE dqmc_complex
   COMPLEX(8), PARAMETER, PRIVATE :: zmone=(-1d0,0d0)
   COMPLEX(8), PARAMETER, PRIVATE :: zzero=(0d0,0d0)
 
-  LOGICAL :: restart=.false.  ! restart mode or not
-  INTEGER :: ith_start=0      ! start from a given bin
-  INTEGER :: mcs_start=1      ! start from a given MC step
-  LOGICAL :: proj             ! true for T=0, false for T>0
+  LOGICAL :: restart                = .false.   ! restart mode or not
+  INTEGER :: ith_start              = 0         ! start from a given bin
+  INTEGER :: mcs_start              = 1         ! start from a given MC step
+  LOGICAL :: proj                   = .false.   ! true for T=0, false for T>0
+  logical :: scratch_global_useful  = .false.   ! whether update_scratch() has been performed in global update
   
   INTEGER nsite    ! number of sites
   INTEGER nelec    ! number of filled electrons, only used for T=0

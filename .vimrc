@@ -13,9 +13,10 @@ let fortran_do_enddo=1    "enable indent of do-enddo in fortran90
 
 set showmatch     "match of bracket
 set cursorline    "show a line at the cursor line
-
+hi CursorLine cterm=NONE ctermbg=black
 syntax enable
-colorscheme default "desert,pablo,ron,solarized,torte,...
+colorscheme ron "default,desert,pablo,ron,solarized,torte,...
+
 
 " plugin manager
 call plug#begin('~/.vim/plugged')

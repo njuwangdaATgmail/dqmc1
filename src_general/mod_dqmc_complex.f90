@@ -1,10 +1,10 @@
 ! I am designing a new/simpler version:
 ! + multi-flavor fermions are supportted
-! + both discrete and continuous fields are treated in the same way 
+! + both discrete and continuous fields are treated in the same way
 !   so that the core module is simpler
 ! + each field has a unique form
 ! + BB...B are stored as Bstring to accelerate. A cheap realizaion:
-!     Bstring_0(:,:,i)=B(i*nscratch)*B(i*nscratch-1)*...*B(1) 
+!     Bstring_0(:,:,i)=B(i*nscratch)*B(i*nscratch-1)*...*B(1)
 !     Bstring_L(:,:,i)=B(ntime)*...*B(ntime-i*nscratch+1)
 ! + checkerboard algorithm for expk? maybe not so emergent
 MODULE dqmc_complex
@@ -17,56 +17,39 @@ MODULE dqmc_complex
   USE measpool
 
   LOGICAL :: restart                = .false.   ! restart mode or not
-  INTEGER :: ith_start              = 0         ! start from a given bin
-  INTEGER :: mcs_start              = 1         ! start from a given MC step
   LOGICAL :: proj                   = .false.   ! true for T=0, false for T>0
   logical :: scratch_global_useful  = .false.   ! whether update_scratch() has been performed in global update
-  
-  INTEGER nsite    ! number of sites
-  INTEGER nelec    ! number of filled electrons, only used for T=0
-  INTEGER ntime    ! number of times
-  INTEGER nsp      ! do measurements from ntime/2+1-nsp to ntime/2+1+nsp for T=0
-                   ! measure G(tau) from time=1 to time=nsp for T>0
-  
-  COMPLEX(8), ALLOCATABLE :: expk(:,:)            ! exp(-dtau*K), (nsite,nsite)
-  COMPLEX(8), ALLOCATABLE :: expk_half(:,:)       ! exp(-dtau*K/2)
-  COMPLEX(8), ALLOCATABLE :: inv_expk(:,:)        ! exp(dtau*K)
-  COMPLEX(8), ALLOCATABLE :: inv_expk_half(:,:)   ! exp(dtau*K/2)
-  COMPLEX(8), ALLOCATABLE :: slater(:,:)          ! (nsite,nelec), trial wave function
-  COMPLEX(8), ALLOCATABLE :: g(:,:)               ! Green's function, (nsite,nsite)
+
+  INTEGER :: ith_start              = 0         ! start from a given bin
+  INTEGER :: mcs_start              = 1         ! start from a given MC step
+
+  INTEGER :: nsite    ! number of sites
+  INTEGER :: nelec    ! number of filled electrons, only used for T=0
+  INTEGER :: ntime    ! number of times
+  INTEGER :: nsp      ! do measurements from ntime/2+1-nsp to ntime/2+1+nsp for T=0
+                      ! measure G(tau) from time=1 to time=nsp for T>0
+
+  COMPLEX(8), ALLOCATABLE :: expk(:,:,:)            ! exp(-dtau*K), (nsite,nsite)
+  COMPLEX(8), ALLOCATABLE :: expk_half(:,:,:)       ! exp(-dtau*K/2)
+  COMPLEX(8), ALLOCATABLE :: inv_expk(:,:,:)        ! exp(dtau*K)
+  COMPLEX(8), ALLOCATABLE :: inv_expk_half(:,:,:)   ! exp(dtau*K/2)
+  COMPLEX(8), ALLOCATABLE :: slater(:,:,:)          ! (nsite,nelec), trial wave function
+  COMPLEX(8), ALLOCATABLE :: slater_Q(:,:,:), slater_D(:,:), slater_R(:,:,;)
+  COMPLEX(8), ALLOCATABLE :: g(:,:,:)               ! Green's function, (nsite,nsite)
   COMPLEX(8), ALLOCATABLE :: Bstring_Q(:,:,:,:)       ! (nsite,nsite/nelec,nblock-1,nflv)
   COMPLEX(8), ALLOCATABLE :: Bstring_D(:,:,:)       ! (nsite/nelec,nblock-1,nflv)
-  COMPLEX(8), ALLOCATABLE :: Bstring_R(:,:,:,:)       ! (nsite/nelec,nsite/nelec,nblock-1,nflv)
+  COMPLEX(8), ALLOCATABLE :: Bstring_T(:,:,:,:)       ! (nsite/nelec,nsite/nelec,nblock-1,nflv)
 
-  INTEGER nising                                  ! descrete auxiliary fields
-  LOGICAL, ALLOCATABLE :: mask_ising(:)           ! whether the ising field is simulated. Then we can write a general input file:
-                                                  ! e.g. containing different boson fields and only choose a few of them in each run.
-  INTEGER, ALLOCATABLE :: ising(:,:,:)            ! (nsite,ntime,nising), I define 1<=ising<=isingmax.
-  INTEGER, ALLOCATABLE :: isingmax(:)             ! (nising)
-  INTEGER, ALLOCATABLE :: isingflip(:,:)          ! (maxval(isingmax)-1,maxval(isingmax))
-  INTEGER, ALLOCATABLE :: form_ising(:)           ! (nising)
-  COMPLEX(8), ALLOCATABLE :: lam_ising(:,:,:)       ! (maxval(isingmax),nsite,nising)
-  COMPLEX(8), ALLOCATABLE :: expflam(:,:,:,:,:)     ! (maxval(dim_form),maxval(dim_form),maxval(isingmax),nsite,nising)
-  COMPLEX(8), ALLOCATABLE :: inv_expflam(:,:,:,:,:) ! (maxval(dim_form),maxval(dim_form),maxval(isingmax),nsite,nising)
-  COMPLEX(8), ALLOCATABLE :: diff_ef(:,:,:,:,:,:)   ! (maxval(dim_form),maxval(dim_form),maxval(isingmax),maxval(isingmax),nsite,nising)
-  
-  INTEGER nphi                                    ! continuous auxiliary fields
-  LOGICAL, ALLOCATABLE :: mask_phi(:)             ! whether the phi field is simulated
-  COMPLEX(8), ALLOCATABLE :: phi(:,:,:)           ! (nsite,ntime,nphi), I define -phimax<=phi<=phimax
-  COMPLEX(8), ALLOCATABLE :: dphi(:)              ! (nphi)
-  INTEGER, ALLOCATABLE :: form_phi(:)             ! (nphi)
-
-  INTEGER nform                                   ! number of form factors in c'*F*c
-  INTEGER, ALLOCATABLE :: ndim_form(:)            ! (nform), dimension of the form
-  LOGICAL, ALLOCATABLE :: mask_form(:,:)          ! (nsite,nform), whether the site belongs to the form
-  INTEGER, ALLOCATABLE :: nb_form(:,:,:)          ! (nsite,maxval(ndim_form),nform), neighbour sites of the form
-  COMPLEX(8), ALLOCATABLE :: fmat(:,:,:)          ! (maxval(ndim_form),maxval(ndim_form),nform)
-  REAL(8), ALLOCATABLE :: expf_E(:,:)             ! (maxval(ndim_form),nform)
-  COMPLEX(8), ALLOCATABLE :: expf_U(:,:,:)        ! (maxval(ndim_form),maxval(ndim_form),nform)
-  COMPLEX(8), ALLOCATABLE :: expf_Udag(:,:,:)     ! (maxval(ndim_form),maxval(ndim_form),nform)
+  INTEGER nfield                                  ! number of auxiliary fields
+  COMPLEX, ALLOCATABLE :: field(:,:,:)            ! (nsite,ntime,nfield)
+  INTEGER, ALLOCATABLE :: ndim_field(:)            ! (nform), dimension of the form
+  LOGICAL, ALLOCATABLE :: mask_field(:)           ! whether the field is simulated. It is useful when we create a general input file
+  LOGICAL, ALLOCATABLE :: mask_field_site(:,:)          ! (nsite,nform), whether the site belongs to the form
+  INTEGER, ALLOCATABLE :: nb_field(:,:,:)          ! (nsite,maxval(ndim_form),nform), neighbour sites of the form
 
   COMPLEX(8) :: currentphase  = (1d0,0d0)            ! the phase of the current configuration
   REAL(8)    :: newMetro      = (0d0,0d0)            ! correction of Metropolis ratio
+  
   INTEGER nbin              ! number of data bins. The covariance is calculated between different bins.
   INTEGER nwarmup           ! warmup steps, in unit of Monte Carlo steps (MCS)
   INTEGER nmeasure          ! MCS in each bin
@@ -75,18 +58,15 @@ MODULE dqmc_complex
   INTEGER nscratch          ! update G from scratch every nscratch steps
   INTEGER ngroup            ! every ngroup matrices are producted directly before performing QDR
   INTEGER randomseed        ! seed of random number generator
-  INTEGER poolsize_r            ! how many real(8) type observables to measure
-  INTEGER poolsize_z            ! how many complex(8) type observables to measure
-                                ! Should we move poolsize_* outside?
-  INTEGER, ALLOCATABLE :: nglobal_ising(:)      ! do global update for ising
-  INTEGER, ALLOCATABLE :: nglobal_phi(:)        ! do global update for phi
   
+  INTEGER, ALLOCATABLE :: ninterval_global(:)      ! MCS distance to do global update
+
   INTEGER :: id=0           ! the index of the current node
-  INTEGER :: nd=1           ! number of total nodes
+  INTEGER :: nd=1           ! total number of all nodes
 
   REAL(8), PRIVATE :: err_fast      ! difference between scratch and fast-update
   REAL(8), PRIVATE :: t0            ! used to save starting time, in order to obtain running time
-  
+
   INTEGER(8), ALLOCATABLE, PRIVATE :: Ntotal_field(:)
   INTEGER(8), ALLOCATABLE, PRIVATE :: Naccept_field(:)
   INTEGER(8), ALLOCATABLE, PRIVATE :: Ntotal_field_global(:)
@@ -96,7 +76,7 @@ MODULE dqmc_complex
 
 CONTAINS
 
-  !> This is the entrance of this module. It should be called from outside.
+  ! This is the entrance of this module. It should be called from outside.
   SUBROUTINE dqmc_driver()
     IMPLICIT NONE
     INTEGER ith,mcs,ierr,ifield
@@ -116,9 +96,9 @@ CONTAINS
 
     ! external initialization subroutine, set required parameters listed above
     CALL init()
-    
+
     ! internal initialization, set remaining parameters
-    CALL init_()  
+    CALL init_()
 
     DO ith=ith_start,nbin
 
@@ -126,15 +106,15 @@ CONTAINS
 
         ! do warmup
         DO mcs=mcs_start,nwarmup
-          
+
           ! do global update
           DO ifield=1,nfield; IF(.not.mask_field(ifield))CYCLE
             IF(mod(mcs,ninterval_global(ifield))==0) CALL dqmc_update_global(ifield)
           END DO
-          
+
           ! do local update without doing measurement
-          CALL dqmc_update_local(.false.)  
-          
+          CALL dqmc_update_local(.false.)
+
           ! output information to screen and save work sapce into hardware
           IF(mod(mcs,ntmpout)==0)THEN
             CALL tmpout_(ith,mcs)
@@ -145,9 +125,9 @@ CONTAINS
 
         ! reset mcs_start=1 in case the program starts from a break point with mcs_start>1
         mcs_start=1
-    
+
       ELSE  ! IF(ith==0)
-      
+
         ! do measurement
         DO mcs=mcs_start,nmeasure*ninterval
 
@@ -155,21 +135,21 @@ CONTAINS
           DO ifield=1,nfield; IF(.not.mask_field(ifield))CYCLE
             IF(mod(mcs,ninterval_global(ifield))==0) CALL dqmc_update_global(ifield)
           END DO
-          
+
           ! only do measurement every ninterval space-time sweeps
           IF(mod(mcs,ninterval)==0)THEN
             CALL dqmc_update_local(.true.)
           ELSE
             CALL dqmc_update_local(.false.)
           END IF
-          
+
           IF(mod(mcs,ntmpout)==0)THEN
             CALL tmpout_(ith,mcs)
             CALL tmpout()
           END IF
-        
+
         END DO  ! DO mcs=mcs_start,nmeasure*ninterval
-        
+
         ! reset mcs_start=1 in case the program starts from a break point with mcs_start>1
         mcs_start=1
 
@@ -182,7 +162,7 @@ CONTAINS
 
     ! do average of the measured observables in the pool
     CALL average_pool()
-    
+
     ! external subroutine, data analysis and output
     CALL postprocess()
 
@@ -201,15 +181,15 @@ CONTAINS
   ! internal initial subroutine, to set remaining parameters
   SUBROUTINE init_()
     IMPLICIT NONE
-    
+
     ! set up the random number seed on different cores
     randomseed=randomseed+701703*id
     CALL init_rng(randomseed)
-    
+
     IF(nising>0) ALLOCATE(ising(nsite,ntime,nising))
     IF(nphi>0) ALLOCATE(phi(nsite,ntime,nphi))
     ALLOCATE(g(nsite,nsite))
-    
+
     CALL set_expf()
 
     IF(nising>0)THEN
@@ -217,7 +197,7 @@ CONTAINS
       CALL set_expflam()
       CALL set_diff_ef()
     END IF
-    
+
     IF(nising>0)THEN
       ALLOCATE(Ntotal_ising(nising),Naccept_ising(nising))
       ALLOCATE(Ntotal_ising_global(nising),Naccept_ising_global(nising))
@@ -247,14 +227,14 @@ CONTAINS
     END IF
 
   END SUBROUTINE init_
-  
-  ! internal subroutine to output running status to screen 
+
+  ! internal subroutine to output running status to screen
   ! and save variables temporarily in case of unexpected breakdown (e.g. power off)
   SUBROUTINE tmpout_(ith,mcs)
     IMPLICIT NONE
     INTEGER, INTENT(IN) :: ith,mcs
     CHARACTER*4 cid
-            
+
     ! temporirally output the running status
     IF(id==0)THEN
       PRINT'(2i8,1a,1e13.6,1a,1e13.6,1a,1f15.2,1A,1e13.6)',ith,mcs,'     (', &
@@ -282,7 +262,7 @@ CONTAINS
     IF(nising>0) WRITE(81) ising,Ntotal_ising,Naccept_ising,Ntotal_ising_global,Naccept_ising_global
     IF(nphi>0) WRITE(81) phi,Ntotal_phi,Naccept_phi,Ntotal_phi_global,Naccept_phi_global
     CLOSE(81)
-    
+
     IF(ith>0)CALL save_pool()
 
   END SUBROUTINE tmpout_
@@ -309,7 +289,7 @@ CONTAINS
     mcs_start=mcs_start+1
 
   END SUBROUTINE loadtmp_
-  
+
   ! internal function to get the running time
   FUNCTION runtime_()
     IMPLICIT NONE
@@ -335,7 +315,7 @@ CONTAINS
   !       evolve_right_2nd: matrix*B_2nd
   !------------------------------------------------------------------------------
   !
-  !> exp( +- (dtau, dtau/2)*K ) * matrix
+  ! exp( +- (dtau, dtau/2)*K ) * matrix
   SUBROUTINE evolve_left_K(matrix,d,flv,inv,half)
     IMPLICIT NONE
     INTEGER, INTENT(IN) :: d,flv
@@ -351,8 +331,8 @@ CONTAINS
       matrix=matmul(expk(:,:,flv),matrix)
     END IF
   END SUBROUTINE evolve_left_K
-  
-  !> matrix * exp( +- (dtau, dtau/2)*K )
+
+  ! matrix * exp( +- (dtau, dtau/2)*K )
   SUBROUTINE evolve_right_K(matrix,d,flv,inv,half)
     IMPLICIT NONE
     INTEGER, INTENT(IN) :: d,flv
@@ -369,7 +349,7 @@ CONTAINS
     END IF
   END SUBROUTINE evolve_right_K
 
-  !> exp( +- V) * matrix
+  ! exp( +- V) * matrix
   SUBROUTINE evolve_left_V(time,ifield,matrix,d,flv,inv)
     IMPLICIT NONE
     INTEGER, INTENT(IN) :: time,ifield,d,flv
@@ -392,8 +372,8 @@ CONTAINS
       END IF
     END DO
   END SUBROUTINE evolve_left_V
-  
-  !> matrix * exp( +- V)
+
+  ! matrix * exp( +- V)
   SUBROUTINE evolve_right_V(time,ifield,matrix,d,flv,inv)
     IMPLICIT NONE
     INTEGER, INTENT(IN) :: time,ifield,d,flv
@@ -416,7 +396,7 @@ CONTAINS
       END IF
     END DO
   END SUBROUTINE evolve_right_V
-  
+
   ! B(time)*matrix
   SUBROUTINE evolve_left(time,matrix,d,flv,inv)
     IMPLICIT NONE
@@ -499,15 +479,15 @@ CONTAINS
     IMPLICIT NONE
     COMPLEX(8) ga1,ga2,lam1,lam2
     REAL(8) a,d
-    d=sqrt(8d0+a**2*(3+a**2)**2)
-    ga1=(-a*(3+a**2)+d)/(4*d)
-    ga2=(a*(3+a**2)+d)/(4*d)
+    d=sqrt(8d0+a**2*(3d0+a**2)**2)
+    ga1=(-a*(3d0+a**2)+d)/(4*d)
+    ga2=(a*(3d0+a**2)+d)/(4*d)
     IF(a>1d0)THEN
-      lam1=acosh((a+2*a**3+a**5+(a**2-1)*d)/4)
-      lam2=acosh((a+2*a**3+a**5-(a**2-1)*d)/4)
+      lam1=acosh((a+2*a**3+a**5+(a**2-1d0)*d)/4)
+      lam2=acosh((a+2*a**3+a**5-(a**2-1d0)*d)/4)
     ELSE
-      lam1=DCMPLX(0d0,acos((a+2*a**3+a**5+(a**2-1)*d)/4))
-      lam2=DCMPLX(0d0,acos((a+2*a**3+a**5-(a**2-1)*d)/4))
+      lam1=DCMPLX(0d0,acos((a+2*a**3+a**5+(a**2-1d0)*d)/4))
+      lam2=DCMPLX(0d0,acos((a+2*a**3+a**5-(a**2-1d0)*d)/4))
     END IF
   END SUBROUTINE HS2
 

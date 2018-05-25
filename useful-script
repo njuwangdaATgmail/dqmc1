@@ -1,0 +1,2 @@
+delete spaces at the end of all lines:
+  :%s/\s\+$//
